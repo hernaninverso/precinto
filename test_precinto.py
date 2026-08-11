@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Tests de regresión de bundlegate. Sin red, sin dependencias externas salvo
-`cryptography`. Se corren con:  python3 test_bundlegate.py
+Tests de regresión de precinto. Sin red, sin dependencias externas salvo
+`cryptography`. Se corren con:  python3 test_precinto.py
 
 Los que importan de verdad son los del grupo LISTA BLANCA CERRADA: un campo
 extra en CUALQUIER nivel de una estructura firmada tiene que invalidarla. Ese
@@ -19,7 +19,7 @@ import tempfile
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import bundlegate as bg  # noqa: E402
+import precinto as bg  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -289,7 +289,7 @@ def _minimal_manifest():
     from collections import OrderedDict
     return OrderedDict([
         ("manifest_format", "1.0"),
-        ("tool", OrderedDict([("name", "bundlegate"), ("version", "0.1.0")])),
+        ("tool", OrderedDict([("name", "precinto"), ("version", "0.1.0")])),
         ("generated_utc", "2026-08-11T00:00:00Z"),
         ("input", OrderedDict([("name", "b.tgz"), ("sha256", "a" * 64),
                                ("bytes", 10), ("mode", "tar")])),
@@ -300,7 +300,7 @@ def _minimal_manifest():
         ("inventory", OrderedDict([("files_total", 2), ("inspected", 1),
                                    ("blocked", 1), ("empty", 0)])),
         ("coverage", OrderedDict([("bytes_inspected", 5), ("bytes_not_inspected", 5),
-                                  ("percent_inspected", 50.0)])),
+                                  ("percent_inspected_bp", 5000)])),
         ("findings", [OrderedDict([("class", "email"), ("file", "a.log"), ("line", 1),
                                    ("severity", "medium"), ("action", "pseudonymized"),
                                    ("fingerprint", "0" * 16)])]),
@@ -312,7 +312,7 @@ def _minimal_manifest():
 
 
 if __name__ == "__main__":
-    print("bundlegate — tests de regresión")
+    print("precinto — tests de regresión")
     test_closed_whitelist()
     test_provenance_not_proven()
     test_archive_safety()

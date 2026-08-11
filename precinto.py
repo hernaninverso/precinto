@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bundlegate — control de salida para paquetes de diagnóstico.
+precinto — control de salida para paquetes de diagnóstico.
 
 Toma el support bundle que un cliente debe enviarle al fabricante de su software,
 produce una COPIA saneada y un MANIFIESTO FIRMADO de lo que se hizo, y bloquea la
@@ -19,11 +19,11 @@ Invariantes (verificados en tests):
      un campo extra invalida la firma.
 
 Uso:
-    bundlegate.py keygen  --out claves/
-    bundlegate.py scan    <bundle.tar.gz|dir> --profile perfiles/generic.json \
+    precinto.py keygen  --out claves/
+    precinto.py scan    <bundle.tar.gz|dir> --profile perfiles/generic.json \
                           --out salida/ [--sign claves/private.pem]
-    bundlegate.py verify  <salida/manifest.json> [--public-key claves/public.pem]
-    bundlegate.py bench   <bundle-con-canarios> --canaries canarios.json
+    precinto.py verify  <salida/manifest.json> [--public-key claves/public.pem]
+    precinto.py bench   <bundle-con-canarios> --canaries canarios.json
 """
 
 import argparse
@@ -44,7 +44,7 @@ import zipfile
 from collections import Counter, OrderedDict
 from datetime import datetime, timezone
 
-TOOL_NAME = "bundlegate"
+TOOL_NAME = "precinto"
 TOOL_VERSION = "0.1.0"
 RULES_VERSION = "2026.08.1"
 MANIFEST_FORMAT = "1.0"
@@ -579,7 +579,7 @@ ENVELOPE_SCHEMA = {
         "output": {"__keys__": {"name", "sha256", "bytes"}},
         "profile": {"__keys__": {"name", "version", "sha256"}},
         "inventory": {"__keys__": {"files_total", "inspected", "blocked", "empty"}},
-        "coverage": {"__keys__": {"bytes_inspected", "bytes_not_inspected", "percent_inspected"}},
+        "coverage": {"__keys__": {"bytes_inspected", "bytes_not_inspected", "percent_inspected_bp"}},
         "findings": {"__item__": {"__keys__": {"class", "file", "line", "severity",
                                                "action", "fingerprint"}}},
         "blocked_files": {"__item__": {"__keys__": {"file", "reason", "bytes"}}},
@@ -677,7 +677,7 @@ def cmd_scan(args):
 
     outdir = os.path.abspath(args.out)
     os.makedirs(outdir, exist_ok=True)
-    workdir = tempfile.mkdtemp(prefix="bundlegate-")
+    workdir = tempfile.mkdtemp(prefix="precinto-")
     sanitized_root = os.path.join(workdir, "sanitized")
     os.makedirs(sanitized_root, exist_ok=True)
 
@@ -759,9 +759,14 @@ def cmd_scan(args):
             ("rules_version", RULES_VERSION),
             ("inventory", OrderedDict([("files_total", n_files), ("inspected", n_inspected),
                                        ("blocked", len(blocked)), ("empty", n_empty)])),
+            # base 10000 (8697 = 86,97 %). Es entero A PROPOSITO: un flotante
+            # se serializa distinto en Python (50.0) que en JavaScript (50), y la
+            # firma se calcula sobre esos bytes -> el verificador del navegador
+            # no podria reproducir la cadena canonica. Sin flotantes, no hay
+            # ambiguedad posible entre implementaciones.
             ("coverage", OrderedDict([("bytes_inspected", bytes_inspected),
                                       ("bytes_not_inspected", bytes_blocked),
-                                      ("percent_inspected", round(pct, 2))])),
+                                      ("percent_inspected_bp", int(round(pct * 100)))])),
             ("findings", [f.as_dict() for f in findings]),
             ("blocked_files", blocked),
             ("limitations", limitations),
@@ -813,14 +818,14 @@ def _report(manifest, findings, out_path, man_path, signed):
     st = manifest["status"]
     icon = {"PASS": "PASA", "REVIEW": "REVISAR", "BLOCKED": "BLOQUEADO"}[st]
     print("")
-    print("  bundlegate %s — %s" % (TOOL_VERSION, manifest["profile"]["name"]))
+    print("  precinto %s — %s" % (TOOL_VERSION, manifest["profile"]["name"]))
     print("  " + "─" * 66)
     print("  Estado                 %s" % icon)
     print("  Archivos               %d totales · %d inspeccionados · %d bloqueados · %d vacíos"
           % (manifest["inventory"]["files_total"], manifest["inventory"]["inspected"],
              manifest["inventory"]["blocked"], manifest["inventory"]["empty"]))
     print("  Cobertura              %.2f%% de los bytes inspeccionados"
-          % manifest["coverage"]["percent_inspected"])
+          % (manifest["coverage"]["percent_inspected_bp"] / 100.0))
     print("  Hallazgos              %d  (críticos %d · altos %d · medios %d · bajos %d)"
           % (len(findings), by_sev[SEV_CRITICAL], by_sev[SEV_HIGH],
              by_sev[SEV_MEDIUM], by_sev[SEV_LOW]))
@@ -861,7 +866,7 @@ def cmd_bench(args):
     terms_rx = build_terms_rx(profile.get("extra_terms"))
 
     root = os.path.abspath(args.bundle)
-    workdir = tempfile.mkdtemp(prefix="bundlegate-bench-")
+    workdir = tempfile.mkdtemp(prefix="precinto-bench-")
     sanitized_all = []          # texto que SÍ sale del perímetro
     blocked_rel = set()
     flagged_at = set()          # (archivo, línea) marcados para revisión
@@ -947,12 +952,12 @@ def cmd_bench(args):
 
 # ─────────────────────────────────────────────────────────────────────────────
 def die(msg, code=2):
-    sys.stderr.write("bundlegate: %s\n" % msg)
+    sys.stderr.write("precinto: %s\n" % msg)
     raise SystemExit(code)
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="bundlegate", description=__doc__,
+    p = argparse.ArgumentParser(prog="precinto", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd")
 

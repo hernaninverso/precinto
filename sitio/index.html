@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Precinto — control de salida para paquetes de diagnóstico</title>
+<meta name="description" content="Precinto sanea el support bundle antes de que salga de tu perímetro y emite un manifiesto firmado de lo que hizo. Local, sin red, sin telemetría. AGPL-3.0.">
+<style>
+  :root{--bg:#faf9f7;--panel:#fff;--ink:#1a1a1a;--ink-2:#4a4a4a;--ink-3:#6f6f6f;
+    --line:#e2ddd6;--line-2:#cfc8be;--accent:#8a2f24;--ok:#2f6b3d;--ok-soft:#eaf2ec;
+    --warn:#8a6a1f;--warn-soft:#f7f1e2;--code-bg:#f2efe9;--code-ink:#2a2a2a}
+  @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+    --bg:#16151a;--panel:#1e1d24;--ink:#eceaf0;--ink-2:#bfbcc7;--ink-3:#918e9c;
+    --line:#312f3a;--line-2:#413e4c;--accent:#e08a7a;--ok:#8fcf9f;--ok-soft:#1d2a20;
+    --warn:#e0bd72;--warn-soft:#2b2519;--code-bg:#26242c;--code-ink:#dcd9e2}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16.5px/1.62 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+  .wrap{max-width:800px;margin:0 auto;padding:56px 24px 100px}
+  .brand{font:600 12px/1 ui-sans-serif,-apple-system,system-ui,sans-serif;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 20px}
+  h1{font-size:2.1rem;line-height:1.18;margin:0 0 16px;font-weight:600;letter-spacing:-.014em}
+  .lede{font-size:1.14rem;line-height:1.55;color:var(--ink-2);margin:0 0 30px}
+  h2{font-size:1.3rem;font-weight:600;margin:46px 0 12px;padding-bottom:7px;
+    border-bottom:1px solid var(--line);letter-spacing:-.008em}
+  h3{font-size:1.02rem;font-weight:600;margin:26px 0 8px}
+  p{margin:0 0 14px} ul,ol{margin:0 0 15px;padding-left:1.3em} li{margin-bottom:6px}
+  a{color:var(--accent)}
+  code{font:.87em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);
+    padding:.12em .38em;border-radius:3px}
+  pre{background:var(--code-bg);color:var(--code-ink);border:1px solid var(--line);
+    border-radius:5px;padding:15px 17px;overflow-x:auto;margin:14px 0;
+    font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .claim{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);
+    border-radius:5px;padding:20px 23px;margin:26px 0}
+  .claim p{margin:0 0 10px}.claim p:last-child{margin:0}
+  .no{color:var(--ink-3)} .si{font-weight:600}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:15px 18px;margin:20px 0}
+  .box.good{border-left:3px solid var(--ok);background:var(--ok-soft)}
+  .box.warn{border-left:3px solid var(--warn);background:var(--warn-soft)}
+  .box p:last-child{margin:0}
+  .lbl{font:600 11px/1.3 ui-sans-serif,-apple-system,system-ui,sans-serif;letter-spacing:.12em;
+    text-transform:uppercase;display:block;margin-bottom:6px;opacity:.82}
+  .tw{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:4px;background:var(--panel)}
+  table{border-collapse:collapse;width:100%;min-width:480px;
+    font:14.5px/1.5 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  th{text-align:left;font:600 11.5px/1.3 ui-sans-serif,-apple-system,system-ui,sans-serif;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding:10px 13px;
+    border-bottom:1.5px solid var(--line-2);white-space:nowrap}
+  td{padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .cta{display:inline-block;margin:6px 10px 6px 0;padding:11px 19px;border-radius:5px;
+    border:1px solid var(--line-2);background:var(--panel);text-decoration:none;color:var(--ink);
+    font:600 14.5px/1 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  .cta.p{background:var(--accent);color:#fff;border-color:var(--accent)}
+  footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink-3);
+    font:13.5px/1.6 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  @media (max-width:600px){.wrap{padding:36px 18px 70px}h1{font-size:1.66rem}.lede{font-size:1.04rem}}
+</style>
+<div class="wrap">
+<p class="brand">Precinto</p>
+<h1>El paquete de diagnóstico sale con un sello,<br>o no sale.</h1>
+<p class="lede">Precinto sanea el <em>support bundle</em> antes de que cruce el perímetro y emite un manifiesto firmado de lo que hizo y de lo que <strong>no pudo</strong> inspeccionar. Corre en tu máquina, sin red, sin credenciales y sin telemetría.</p>
+
+<div class="claim">
+  <p class="no">No dice: «este paquete ya no contiene secretos». Nadie puede decir eso, y un producto que lo prometa está mintiendo.</p>
+  <p class="si">Dice: «este paquete fue procesado por la política X versión Y, con estas transformaciones y estas limitaciones comprobables».</p>
+  <p style="margin-top:12px;color:var(--ink-2)">La diferencia entre esas dos frases es el producto entero. La primera es una promesa que nadie puede sostener. La segunda es un hecho que un tercero puede verificar por su cuenta, sin confiar en nosotros.</p>
+</div>
+
+<p>
+  <a class="cta p" href="verificar.html">Verificar un precinto</a>
+  <a class="cta" href="#instalar">Instalar</a>
+  <a class="cta" href="#licencia">Licencia</a>
+</p>
+
+<h2>Por qué tiene que correr en tu máquina</h2>
+<p>No es una preferencia de arquitectura ni una postura: es una imposibilidad de la alternativa.</p>
+<div class="box warn">
+  <p><strong>Nadie puede mandar su paquete lleno de datos sensibles a un servicio en la nube para preguntarle si contiene datos sensibles.</strong> La circularidad obliga a que la herramienta viva del lado del cliente. Por eso Precinto no tiene versión alojada, no tiene cuenta, no tiene panel y no va a tenerlos.</p>
+</div>
+<p>La misma lógica se aplica al verificador de esta web: valida la firma <strong>dentro de tu navegador</strong>, con la aritmética de curva incluida en la propia página. Podés desconectar la red, guardarla y seguir usándola.</p>
+
+<h2 id="instalar">Qué se instala</h2>
+<p>Un solo archivo de Python, sin dependencias más allá de <code>cryptography</code> para la firma. No hay servicio, no hay demonio, no hay puerto a la escucha, no hay proceso residente.</p>
+<pre>git clone &lt;repositorio&gt; &amp;&amp; cd precinto
+
+python3 precinto.py keygen --out claves
+python3 precinto.py scan support-bundle.tar.gz \
+        --profile perfiles/atlassian-dc.json \
+        --out salida --sign claves/private.pem</pre>
+<p>Sale una copia saneada y un <code>manifest.json</code>. Códigos de salida: <code>0</code> pasa · <code>3</code> requiere revisión humana · <code>4</code> bloqueado.</p>
+
+<h3>Y qué no hace, nunca</h3>
+<ul>
+  <li>No modifica el original. Siempre escribe una copia nueva.</li>
+  <li>No abre sockets. Comprobado en la suite corriendo el escaneo entero con la red deshabilitada a nivel de proceso, no por promesa.</li>
+  <li>No pide credenciales ni lanza subprocesos.</li>
+  <li>No manda estadísticas, ni de uso ni anónimas.</li>
+  <li>No comprueba licencias contra un servidor. Nada llama a casa.</li>
+</ul>
+
+<h2>Qué hace con lo que encuentra</h2>
+<div class="tw"><table>
+  <thead><tr><th>Situación</th><th>Qué pasa</th></tr></thead>
+  <tbody>
+    <tr><td>Una credencial reconocida por una regla exacta</td><td>Se reemplaza por un pseudónimo estable</td></tr>
+    <tr><td>Una cadena ambigua, de alta entropía</td><td>Se <strong>marca para revisión humana</strong>. No se borra: podría ser un identificador de compilación que hace falta para el diagnóstico</td></tr>
+    <tr><td>Un formato que no se puede inspeccionar con garantías</td><td>El archivo se <strong>bloquea entero</strong>. No sale</td></tr>
+    <tr><td>Una traza de diagnóstico legítima</td><td>Queda intacta. Anonimizar destruyendo el diagnóstico no sirve a nadie</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Pseudónimos que conservan el diagnóstico</h3>
+<p>El mismo valor produce el mismo token <strong>dentro de un paquete</strong>: el equipo de soporte sigue viendo que «este usuario aparece en cuatro archivos» sin ver quién es. Otra ejecución usa otra sal, así que dos paquetes no se pueden cruzar ni revertir por diccionario. La sal es efímera y no se guarda en ningún lado.</p>
+
+<h2>Lo que el manifiesto no puede probar</h2>
+<div class="box">
+  <p>Verificar una firma contra la clave que viaja <em>dentro del mismo archivo</em> es circular: demuestra que nadie lo alteró, pero cualquiera pudo firmarlo con su propia clave. Por eso Precinto devuelve <strong>NO PROBADA</strong> en ese caso, con código de salida 3, y nunca la palabra «verificada».</p>
+  <p style="margin-top:10px">Para probar la procedencia hace falta la clave pública del emisor obtenida por un canal <strong>independiente</strong> del archivo. Es una distinción incómoda de explicar y fácil de omitir — y omitirla es exactamente cómo una herramienta de verificación termina certificando lo que no puede.</p>
+</div>
+
+<h2>Medido, no prometido</h2>
+<div class="tw"><table>
+  <thead><tr><th>Sobre el banco sintético de canarios</th><th class="n"></th></tr></thead>
+  <tbody>
+    <tr><td>Canarios plantados, en 14 clases</td><td class="n">17</td></tr>
+    <tr><td>Neutralizados — reemplazados por pseudónimo</td><td class="n">15</td></tr>
+    <tr><td>Retenidos — su archivo se bloqueó entero</td><td class="n">1</td></tr>
+    <tr><td>Marcados para revisión humana</td><td class="n">1</td></tr>
+    <tr><td><strong>Escapados</strong></td><td class="n"><strong>0</strong></td></tr>
+    <tr><td>Comprobaciones de regresión (Python + verificador web)</td><td class="n">47</td></tr>
+  </tbody>
+</table></div>
+<p>El banco está en el repositorio y se regenera con semilla fija: cualquiera reproduce estos números en su máquina en menos de un minuto. Y el desglose es de cuatro estados, no de dos, porque un banco que solo dice «contenido / no contenido» se felicita a sí mismo — la primera versión de éste informaba 100% sin haber medido nada.</p>
+
+<h2 id="licencia">Licencia</h2>
+<div class="tw"><table>
+  <thead><tr><th>Si vos…</th><th>Entonces…</th></tr></thead>
+  <tbody>
+    <tr><td>Lo corrés en tu infraestructura, para tus propios paquetes</td><td class="si">AGPL-3.0. No pagás nada y no hablás con nadie.</td></tr>
+    <tr><td>Lo auditás, lo modificás, lo integrás con tus herramientas</td><td class="si">AGPL-3.0. Igual.</td></tr>
+    <tr><td>Lo usás en una consultoría, sobre el paquete de tu cliente</td><td class="si">AGPL-3.0. Igual.</td></tr>
+    <tr><td><strong>Lo redistribuís dentro de tu producto propietario</strong></td><td>Licencia comercial, por producto. Distribución ilimitada aguas abajo.</td></tr>
+  </tbody>
+</table></div>
+<p><strong>El hecho por el que se cobra no es usar la herramienta: es redistribuirla dentro de un producto cerrado.</strong> Es el esquema de wolfSSL y de Qt, y los departamentos de compras ya saben leerlo.</p>
+<div class="box good">
+  <p>La versión abierta es <strong>completa</strong>: no hay funciones recortadas, ni un motor distinto, ni una edición mutilada para forzar la compra. Si el proyecto dejara de mantenerse, lo que está publicado sigue sirviendo. Y la licencia comercial <strong>no apaga el software si no se renueva</strong> — la renovación habilita versiones y reglas nuevas, nunca es un interruptor sobre lo ya instalado. Poner un interruptor comercial dentro de infraestructura desconectada sería justo el tipo de cosa que este proyecto existe para no hacer.</p>
+</div>
+
+<h2>Para fabricantes de software autoalojado</h2>
+<p>Si tu documentación le pide al cliente que revise el paquete antes de mandártelo, ya conocés el problema: ese pedido es lento, manual y propenso a error, y el que lo paga en horas es tu equipo de soporte cuando el paquete llega tarde o incompleto.</p>
+<p>Precinto se integra después de tu generador de paquetes, con un perfil calibrado para tu formato. El cliente final no incorpora un proveedor privilegiado más: recibe una actualización tuya. Hay perfiles de partida para nueve productos en <code>perfiles/</code>, sin calibrar contra paquetes reales — eso se hace con tus datos, en tu máquina.</p>
+
+<footer>
+  <p><strong>Precinto</strong> — AGPL-3.0 · Sin cuenta, sin telemetría, sin servicio alojado.</p>
+  <p style="margin-top:8px">Un precinto no oculta la carga: deja constancia verificable de que nadie la abrió desde que se cerró, y va acompañado del documento que declara lo que lleva adentro.</p>
+</footer>
+</div>
+</html>

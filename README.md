@@ -1,4 +1,4 @@
-# bundlegate
+# Precinto
 
 Control de salida para paquetes de diagnóstico (*support bundles*).
 
@@ -25,13 +25,13 @@ del cliente.
 
 ```bash
 python3 make_canary_bundle.py --out demo          # paquete sintético con canarios
-python3 bundlegate.py keygen --out claves         # par Ed25519
+python3 precinto.py keygen --out claves         # par Ed25519
 
-python3 bundlegate.py scan demo/support-bundle-demo.tar.gz \
+python3 precinto.py scan demo/support-bundle-demo.tar.gz \
         --profile perfiles/demo.json --out demo/salida --sign claves/private.pem
 
-python3 bundlegate.py verify demo/salida/manifest.json --public-key claves/public.pem
-python3 bundlegate.py bench demo/support-bundle-demo.tar.gz \
+python3 precinto.py verify demo/salida/manifest.json --public-key claves/public.pem
+python3 precinto.py bench demo/support-bundle-demo.tar.gz \
         --canaries demo/canaries.json --profile perfiles/demo.json
 ```
 
@@ -61,6 +61,24 @@ HMAC con sal **efímera**, generada por ejecución y nunca persistida.
 - Otra ejecución produce otra sal → no se pueden cruzar dos paquetes ni revertir por
   diccionario.
 
+## Licencia
+
+**AGPL-3.0** (ver `LICENSE`) + licencia comercial por producto para redistribuir dentro
+de software propietario (ver `COMERCIAL.md`). El hecho por el que se cobra no es usar la
+herramienta: es redistribuirla dentro de un producto cerrado. Molde: wolfSSL.
+
+## Qué se instala y qué se visita
+
+|  | Qué es | Dónde corre |
+|---|---|---|
+| **Se instala** | `precinto.py` — un archivo, sin servicio ni demonio ni puerto | En la máquina del cliente |
+| **Se visita** | `sitio/` — landing y verificador de manifiestos | Estático. El verificador valida la firma **dentro del navegador** |
+
+**No hay nada que correr en un servidor.** No hay API, ni cuenta, ni panel, ni licencias
+que se comprueben contra un servicio. Es una consecuencia del diseño, no una carencia:
+un producto que sostiene que los datos no deben salir del perímetro no puede pedir que
+le manden nada.
+
 ## Estado
 
 Maqueta de validación, no producto. Existe para dos cosas:
@@ -83,5 +101,5 @@ por marketing.
 ## Tests
 
 ```bash
-python3 test_bundlegate.py     # 32 comprobaciones, sin red ni dependencias externas
+python3 test_precinto.py     # 32 comprobaciones, sin red ni dependencias externas
 ```

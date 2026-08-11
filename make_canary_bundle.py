@@ -5,7 +5,7 @@ Genera un paquete de diagnóstico SINTÉTICO con canarios plantados y su registr
 Ningún valor de acá es real: son secretos fabricados con el formato correcto para
 que los detectores tengan que encontrarlos. Sirve para dos cosas:
 
-  1. Medir el recall del gate sin tocar datos de nadie (`bundlegate.py bench`).
+  1. Medir el recall del gate sin tocar datos de nadie (`precinto.py bench`).
   2. Mostrarle a un fabricante el antes/después sin pedirle un solo archivo suyo.
      Eso es lo que permite hacer la primera demostración sin acuerdo de
      confidencialidad, y es justamente el punto que destraba la venta escrita.

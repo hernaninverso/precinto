@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verificar un precinto</title>
+<meta name="description" content="Verificador de manifiestos de Precinto. Corre entero en tu navegador: el archivo no se sube a ningún lado.">
+<style>
+  :root{--bg:#faf9f7;--panel:#fff;--ink:#1a1a1a;--ink-2:#4a4a4a;--ink-3:#6f6f6f;
+    --line:#e2ddd6;--line-2:#cfc8be;--accent:#8a2f24;--ok:#2f6b3d;--ok-soft:#eaf2ec;
+    --warn:#8a6a1f;--warn-soft:#f7f1e2;--bad:#8a2f24;--bad-soft:#f7ecea;--code-bg:#f2efe9}
+  @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+    --bg:#16151a;--panel:#1e1d24;--ink:#eceaf0;--ink-2:#bfbcc7;--ink-3:#918e9c;
+    --line:#312f3a;--line-2:#413e4c;--accent:#e08a7a;--ok:#8fcf9f;--ok-soft:#1d2a20;
+    --warn:#e0bd72;--warn-soft:#2b2519;--bad:#e08a7a;--bad-soft:#2c1f1e;--code-bg:#26242c}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+  .wrap{max-width:760px;margin:0 auto;padding:44px 22px 90px}
+  h1{font-size:1.8rem;margin:0 0 8px;font-weight:600;letter-spacing:-.01em}
+  .sub{color:var(--ink-3);margin:0 0 26px;
+    font:14px/1.55 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  h2{font-size:1.14rem;margin:34px 0 10px;font-weight:600}
+  p{margin:0 0 13px}
+  a{color:var(--accent)}
+  code{font:.86em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);
+    padding:.11em .36em;border-radius:3px}
+  .drop{border:2px dashed var(--line-2);border-radius:8px;padding:34px 22px;text-align:center;
+    background:var(--panel);transition:border-color .15s,background .15s;cursor:pointer}
+  .drop.over{border-color:var(--accent);background:var(--ok-soft)}
+  .drop p{margin:0;color:var(--ink-3);
+    font:14.5px/1.5 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  .drop strong{color:var(--ink);font-size:16px}
+  input[type=file]{display:none}
+  textarea{width:100%;min-height:82px;margin-top:9px;padding:10px 12px;border:1px solid var(--line);
+    border-radius:5px;background:var(--panel);color:var(--ink);resize:vertical;
+    font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+  label.f{display:block;margin-top:20px;font:600 13px/1.4 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  label.f span{font-weight:400;color:var(--ink-3)}
+  .res{margin-top:26px}
+  .verdict{border-radius:6px;padding:17px 19px;border:1px solid var(--line);background:var(--panel)}
+  .verdict.ok{border-left:4px solid var(--ok);background:var(--ok-soft)}
+  .verdict.warn{border-left:4px solid var(--warn);background:var(--warn-soft)}
+  .verdict.bad{border-left:4px solid var(--bad);background:var(--bad-soft)}
+  .verdict h3{margin:0 0 8px;font-size:1.08rem}
+  .verdict p{margin:0 0 8px;font-size:15px}.verdict p:last-child{margin:0}
+  table{border-collapse:collapse;width:100%;margin-top:16px;
+    font:14px/1.5 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  th{text-align:left;font:600 11.5px/1.3 ui-sans-serif,-apple-system,system-ui,sans-serif;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding:8px 10px;
+    border-bottom:1.5px solid var(--line-2)}
+  td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  ul.errs{margin:9px 0 0;padding-left:1.2em;
+    font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:4px;padding:14px 17px;margin:24px 0;
+    font:14px/1.6 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  .note strong{font-weight:600}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--ink-3);
+    font:13px/1.55 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  .eng{color:var(--ink-3);font:12px ui-monospace,Menlo,monospace;margin-top:12px}
+</style>
+<div class="wrap">
+<h1>Verificar un precinto</h1>
+<p class="sub">Comprueba la firma y la estructura de un <code>manifest.json</code> emitido por Precinto.</p>
+
+<div class="note">
+  <strong>Esta página no sube tu archivo a ningún lado.</strong> Todo el cálculo —el hash, la
+  aritmética de curva, la validación de estructura— ocurre en tu navegador. Podés desconectar la
+  red, guardar esta página y seguir usándola; podés leer su código fuente entero, que está acá
+  mismo. Un verificador que mandara el manifiesto a un servidor contradiría exactamente lo que
+  este proyecto sostiene.
+</div>
+
+<div class="drop" id="drop" role="button" tabindex="0">
+  <p><strong>Arrastrá acá el manifest.json</strong></p>
+  <p style="margin-top:6px">o hacé clic para elegirlo</p>
+  <input type="file" id="file" accept=".json,application/json">
+</div>
+
+<label class="f">Clave pública <span>— opcional, pero es lo único que prueba la procedencia</span>
+  <textarea id="pk" placeholder="Pegá acá la clave pública en PEM, obtenida por un canal INDEPENDIENTE del archivo (el sitio del proveedor, un correo firmado, un contrato).&#10;&#10;-----BEGIN PUBLIC KEY-----&#10;...&#10;-----END PUBLIC KEY-----"></textarea>
+</label>
+
+<div class="res" id="res"></div>
+
+<footer>
+  <p>Precinto — AGPL-3.0. El verificador de línea de comandos hace exactamente las mismas
+  comprobaciones: <code>precinto.py verify manifest.json --public-key public.pem</code></p>
+  <p class="eng" id="eng"></p>
+</footer>
+</div>
+
+<script>
+"use strict";
+
+/* ───────────────────────── Ed25519 (RFC 8032) en BigInt ─────────────────────
+   Implementado acá en vez de depender de WebCrypto porque el soporte de Ed25519
+   en WebCrypto todavía es desparejo entre navegadores, y un verificador que
+   funciona en unos navegadores y en otros no es un verificador que no sirve.
+   Solo se usa crypto.subtle.digest('SHA-512'), que sí está en todos lados.    */
+
+const P   = (1n << 255n) - 19n;
+const L   = (1n << 252n) + 27742317777372353535851937790883648493n;
+const D   = -121665n * inv(121666n) % P;
+const I   = powmod(2n, (P - 1n) / 4n, P);           // sqrt(-1)
+const By  = 4n * inv(5n) % P;
+const Bx  = xRecover(By);
+const B   = [mod(Bx), mod(By), 1n, mod(Bx * By)];   // extendidas (X,Y,Z,T)
+
+function mod(a, m = P) { const r = a % m; return r >= 0n ? r : r + m; }
+function powmod(b, e, m) {
+  let r = 1n; b = mod(b, m);
+  while (e > 0n) { if (e & 1n) r = r * b % m; b = b * b % m; e >>= 1n; }
+  return r;
+}
+function inv(a) { return powmod(a, P - 2n, P); }
+
+function xRecover(y) {
+  const yy = y * y % P;
+  const u  = mod(yy - 1n), v = mod(D * yy + 1n);
+  let x = mod(u * inv(v)); x = powmod(x, (P + 3n) / 8n, P);
+  if (mod(x * x - mod(u * inv(v))) !== 0n) x = x * I % P;
+  if (mod(x * x - mod(u * inv(v))) !== 0n) return null;
+  if (x % 2n !== 0n) x = P - x;
+  return x;
+}
+
+function ptAdd(p1, p2) {
+  const [X1, Y1, Z1, T1] = p1, [X2, Y2, Z2, T2] = p2;
+  const A = mod((Y1 - X1) * (Y2 - X2));
+  const Bb= mod((Y1 + X1) * (Y2 + X2));
+  const C = mod(T1 * 2n * D * T2);
+  const Dd= mod(Z1 * 2n * Z2);
+  const E = mod(Bb - A), F = mod(Dd - C), G = mod(Dd + C), H = mod(Bb + A);
+  return [mod(E * F), mod(G * H), mod(F * G), mod(E * H)];
+}
+function ptMul(p, s) {
+  let q = [0n, 1n, 1n, 0n];
+  while (s > 0n) { if (s & 1n) q = ptAdd(q, p); p = ptAdd(p, p); s >>= 1n; }
+  return q;
+}
+function ptEq(p1, p2) {           // comparación en proyectivas, sin invertir
+  const [X1, Y1, Z1] = p1, [X2, Y2, Z2] = p2;
+  return mod(X1 * Z2 - X2 * Z1) === 0n && mod(Y1 * Z2 - Y2 * Z1) === 0n;
+}
+
+function leToBig(bytes) { let n = 0n; for (let i = bytes.length - 1; i >= 0; i--) n = (n << 8n) | BigInt(bytes[i]); return n; }
+
+function decodePoint(bytes) {
+  if (bytes.length !== 32) return null;
+  const n = leToBig(bytes);
+  const y = n & ((1n << 255n) - 1n);
+  const sign = (n >> 255n) & 1n;
+  if (y >= P) return null;
+  let x = xRecover(y);
+  if (x === null) return null;
+  if ((x & 1n) !== sign) x = mod(P - x);
+  return [x, y, 1n, mod(x * y)];
+}
+
+async function sha512(u8) {
+  const h = await crypto.subtle.digest("SHA-512", u8);
+  return new Uint8Array(h);
+}
+
+async function ed25519Verify(sig, msg, pub) {
+  if (sig.length !== 64 || pub.length !== 32) return false;
+  const A = decodePoint(pub);            if (!A) return false;
+  const R = decodePoint(sig.slice(0, 32)); if (!R) return false;
+  const S = leToBig(sig.slice(32, 64));
+  if (S >= L) return false;                        // maleabilidad: S debe ser canónico
+  const k = mod(leToBig(await sha512(concat(sig.slice(0, 32), pub, msg))), L);
+  return ptEq(ptMul(B, S), ptAdd(R, ptMul(A, k)));
+}
+
+function concat(...arrs) {
+  const n = arrs.reduce((a, x) => a + x.length, 0);
+  const out = new Uint8Array(n); let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+function b64ToBytes(b64) {
+  const s = atob(b64.replace(/\s+/g, ""));
+  const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
+
+/* Extrae los 32 bytes crudos de una clave pública Ed25519 en PEM (SPKI).
+   El prefijo DER de una SPKI Ed25519 es fijo y son 12 bytes. */
+function pemToRawEd25519(pem) {
+  const m = pem.match(/-----BEGIN PUBLIC KEY-----([\s\S]+?)-----END PUBLIC KEY-----/);
+  if (!m) return null;
+  const der = b64ToBytes(m[1]);
+  if (der.length !== 44) return null;
+  const want = [0x30,0x2a,0x30,0x05,0x06,0x03,0x2b,0x65,0x70,0x03,0x21,0x00];
+  for (let i = 0; i < want.length; i++) if (der[i] !== want[i]) return null;
+  return der.slice(12);
+}
+
+/* ─────────── Serialización canónica: idéntica a json.dumps(sort_keys=True,
+     separators=(',',':'), ensure_ascii=False) del verificador de Python ───── */
+function canonical(v) {
+  if (v === null) return "null";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return jsonNumber(v);
+  if (typeof v === "string") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
+  const keys = Object.keys(v).sort();
+  return "{" + keys.map(k => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}";
+}
+/* El manifiesto no contiene ningun flotante a proposito: Python serializa 50.0
+   y JavaScript 50, y la firma se calcula sobre esos bytes. Con solo enteros,
+   cadenas, booleanos, listas y objetos, las dos implementaciones producen la
+   misma cadena canonica sin excepciones ni casos especiales. Si alguna vez
+   entra un flotante al manifiesto, esta pagina deja de validar: es un canario
+   deliberado, no una fragilidad. */
+function jsonNumber(n) {
+  if (!Number.isInteger(n)) throw new Error(
+    "El manifiesto contiene un flotante (" + n + "). El formato solo admite enteros.");
+  return String(n);
+}
+
+/* ─────────────────── Lista blanca CERRADA, en todos los niveles ─────────── */
+const SCHEMA = {
+  __keys__: ["manifest", "signature"],
+  signature: { __keys__: ["algorithm", "public_key_raw_b64", "value_b64"] },
+  manifest: {
+    __keys__: ["manifest_format","tool","generated_utc","input","output","profile",
+               "rules_version","inventory","coverage","findings","blocked_files",
+               "limitations","status"],
+    tool:      { __keys__: ["name","version"] },
+    input:     { __keys__: ["name","sha256","bytes","mode"] },
+    output:    { __keys__: ["name","sha256","bytes"] },
+    profile:   { __keys__: ["name","version","sha256"] },
+    inventory: { __keys__: ["files_total","inspected","blocked","empty"] },
+    coverage:  { __keys__: ["bytes_inspected","bytes_not_inspected","percent_inspected_bp"] },
+    findings:  { __item__: { __keys__: ["class","file","line","severity","action","fingerprint"] } },
+    blocked_files: { __item__: { __keys__: ["file","reason","bytes"] } },
+  },
+};
+
+function validateClosed(obj, schema, path = "$") {
+  const errs = [];
+  if (schema.__keys__) {
+    if (obj === null || typeof obj !== "object" || Array.isArray(obj))
+      return [path + ": se esperaba un objeto"];
+    const allowed = new Set(schema.__keys__);
+    for (const k of Object.keys(obj).sort())
+      if (!allowed.has(k)) errs.push(path + "." + k + ": campo NO DECLARADO (lista blanca cerrada)");
+    for (const k of schema.__keys__)
+      if (!(k in obj)) errs.push(path + "." + k + ": campo obligatorio ausente");
+    for (const k of Object.keys(schema))
+      if (k !== "__keys__" && k in obj) errs.push(...validateClosed(obj[k], schema[k], path + "." + k));
+  }
+  if (schema.__item__) {
+    if (!Array.isArray(obj)) return errs.concat([path + ": se esperaba una lista"]);
+    obj.forEach((it, i) => errs.push(...validateClosed(it, schema.__item__, path + "[" + i + "]")));
+  }
+  return errs;
+}
+
+/* ─────────────────────────────── interfaz ──────────────────────────────── */
+const $ = s => document.querySelector(s);
+const res = $("#res"), drop = $("#drop"), fileEl = $("#file"), pkEl = $("#pk");
+
+drop.addEventListener("click", () => fileEl.click());
+drop.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") fileEl.click(); });
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("over");
+  if (e.dataTransfer.files[0]) read(e.dataTransfer.files[0]);
+});
+fileEl.addEventListener("change", () => { if (fileEl.files[0]) read(fileEl.files[0]); });
+pkEl.addEventListener("input", () => { if (LAST) run(LAST); });
+
+let LAST = null;
+function read(f) {
+  const r = new FileReader();
+  r.onload = () => { LAST = r.result; run(LAST); };
+  r.readAsText(f);
+}
+
+function card(kind, title, body) {
+  return '<div class="verdict ' + kind + '"><h3>' + title + "</h3>" + body + "</div>";
+}
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+async function run(text) {
+  let env;
+  try { env = JSON.parse(text); }
+  catch (e) { res.innerHTML = card("bad", "No es un JSON válido", "<p>" + esc(e.message) + "</p>"); return; }
+
+  const errs = validateClosed(env, SCHEMA);
+  if (errs.length) {
+    res.innerHTML = card("bad", "Estructura inválida",
+      "<p>El archivo no supera la lista blanca cerrada. Un solo campo no declarado " +
+      "—en la raíz, en un sub-bloque o en un elemento de lista— invalida el precinto, " +
+      "porque sería contenido visible que la firma no cubre.</p><ul class='errs'>" +
+      errs.slice(0, 12).map(e => "<li>" + esc(e) + "</li>").join("") +
+      (errs.length > 12 ? "<li>… y " + (errs.length - 12) + " más</li>" : "") + "</ul>");
+    return;
+  }
+
+  const sigBlock = env.signature;
+  if (sigBlock.algorithm === "none") {
+    res.innerHTML = card("warn", "Sin firmar",
+      "<p>Este manifiesto se generó sin la opción <code>--sign</code>. Describe un proceso, " +
+      "pero nada impide que haya sido alterado después de emitirse.</p>") + summary(env.manifest);
+    return;
+  }
+  if (sigBlock.algorithm !== "Ed25519") {
+    res.innerHTML = card("bad", "Algoritmo no admitido", "<p>" + esc(sigBlock.algorithm) + "</p>");
+    return;
+  }
+
+  const msg = new TextEncoder().encode(canonical(env.manifest));
+  const sig = b64ToBytes(sigBlock.value_b64);
+
+  const pemTxt = pkEl.value.trim();
+  let external = null, pemError = null;
+  if (pemTxt) {
+    external = pemToRawEd25519(pemTxt);
+    if (!external) pemError = "No pude leer esa clave. Tiene que ser una clave pública Ed25519 en PEM.";
+  }
+  const pub = external || b64ToBytes(sigBlock.public_key_raw_b64);
+
+  let okSig = false;
+  const t0 = performance.now();
+  try { okSig = await ed25519Verify(sig, msg, pub); } catch (e) { okSig = false; }
+  const ms = Math.round(performance.now() - t0);
+  $("#eng").textContent = "Ed25519 en BigInt · SHA-512 por WebCrypto · verificación en " + ms + " ms · sin red";
+
+  if (!okSig) {
+    res.innerHTML = card("bad", "Firma inválida",
+      "<p>" + (external
+        ? "El manifiesto no fue firmado por la clave que aportaste, o fue alterado después de firmarse."
+        : "El manifiesto fue alterado después de firmarse.") + "</p>" +
+      (pemError ? "<p>" + esc(pemError) + "</p>" : "")) + summary(env.manifest);
+    return;
+  }
+
+  if (external) {
+    res.innerHTML = card("ok", "Verificada",
+      "<p>La firma es válida contra la clave pública que aportaste. <strong>La procedencia " +
+      "queda probada respecto de esa clave</strong>, y el contenido del manifiesto no cambió " +
+      "desde que se firmó.</p>") + summary(env.manifest);
+  } else {
+    res.innerHTML = card("warn", "No probada",
+      "<p>La firma es coherente con la clave que viaja <strong>dentro del propio archivo</strong>. " +
+      "Eso demuestra que el manifiesto no fue alterado, pero <strong>no demuestra quién lo " +
+      "emitió</strong>: cualquiera pudo firmarlo con su propia clave y adjuntarla.</p>" +
+      "<p>Para probar la procedencia, pegá arriba la clave pública del proveedor obtenida por " +
+      "un canal <em>independiente</em> de este archivo.</p>") + summary(env.manifest);
+  }
+}
+
+function summary(m) {
+  const st = { PASS: ["Pasa", "ok"], REVIEW: ["Requiere revisión", "warn"], BLOCKED: ["Bloqueado", "bad"] }[m.status]
+          || [m.status, "warn"];
+  const sev = {};
+  for (const f of m.findings) sev[f.severity] = (sev[f.severity] || 0) + 1;
+  const rows = [
+    ["Estado del paquete", st[0]],
+    ["Perfil aplicado", m.profile.name + " " + m.profile.version],
+    ["Versión de reglas", m.rules_version],
+    ["Emitido", m.generated_utc],
+    ["Archivos", m.inventory.files_total + " totales · " + m.inventory.inspected +
+       " inspeccionados · " + m.inventory.blocked + " bloqueados"],
+    ["Cobertura", (m.coverage.percent_inspected_bp / 100).toFixed(2) + " % de los bytes"],
+    ["Hallazgos", m.findings.length + " (" + Object.entries(sev).map(([k, v]) => v + " " + k).join(" · ") + ")"],
+    ["Copia saneada", m.output.name],
+    ["sha256 de la copia", m.output.sha256.slice(0, 32) + "…"],
+  ];
+  let html = "<table><thead><tr><th>Qué declara el precinto</th><th></th></tr></thead><tbody>";
+  for (const [k, v] of rows) html += "<tr><td>" + esc(k) + "</td><td>" + esc(v) + "</td></tr>";
+  html += "</tbody></table>";
+  if (m.blocked_files.length) {
+    html += "<table><thead><tr><th>No salió del perímetro</th><th>Motivo</th><th class='n'>bytes</th></tr></thead><tbody>";
+    for (const b of m.blocked_files.slice(0, 10))
+      html += "<tr><td><code>" + esc(b.file) + "</code></td><td>" + esc(b.reason) +
+              "</td><td class='n'>" + b.bytes + "</td></tr>";
+    html += "</tbody></table>";
+  }
+  html += "<table><thead><tr><th>Limitaciones declaradas por el propio precinto</th></tr></thead><tbody>";
+  for (const l of m.limitations) html += "<tr><td>" + esc(l) + "</td></tr>";
+  html += "</tbody></table>";
+  return html;
+}
+</script>
+</html>
