@@ -72,6 +72,7 @@
   <a class="cta p" href="verificar.html">Verificar un precinto</a>
   <a class="cta" href="#instalar">Instalar</a>
   <a class="cta" href="#licencia">Licencia</a>
+  <a class="cta" href="https://github.com/hernaninverso/precinto">Código</a>
 </p>
 
 <h2>Por qué tiene que correr en tu máquina</h2>
@@ -83,7 +84,7 @@
 
 <h2 id="instalar">Qué se instala</h2>
 <p>Un solo archivo de Python, sin dependencias más allá de <code>cryptography</code> para la firma. No hay servicio, no hay demonio, no hay puerto a la escucha, no hay proceso residente.</p>
-<pre>git clone &lt;repositorio&gt; &amp;&amp; cd precinto
+<pre>git clone https://github.com/hernaninverso/precinto.git &amp;&amp; cd precinto
 
 python3 precinto.py keygen --out claves
 python3 precinto.py scan support-bundle.tar.gz \
@@ -154,7 +155,7 @@ python3 precinto.py scan support-bundle.tar.gz \
 <p>Precinto se integra después de tu generador de paquetes, con un perfil calibrado para tu formato. El cliente final no incorpora un proveedor privilegiado más: recibe una actualización tuya. Hay perfiles de partida para nueve productos en <code>perfiles/</code>, sin calibrar contra paquetes reales — eso se hace con tus datos, en tu máquina.</p>
 
 <footer>
-  <p><strong>Precinto</strong> — AGPL-3.0 · Sin cuenta, sin telemetría, sin servicio alojado.</p>
+  <p><strong>Precinto</strong> — AGPL-3.0 · Sin cuenta, sin telemetría, sin servicio alojado · <a href="https://github.com/hernaninverso/precinto">github.com/hernaninverso/precinto</a></p>
   <p style="margin-top:8px">Un precinto no oculta la carga: deja constancia verificable de que nadie la abrió desde que se cerró, y va acompañado del documento que declara lo que lleva adentro.</p>
 </footer>
 </div>
