@@ -77,5 +77,10 @@ sería exactamente el tipo de cosa que este producto existe para no hacer.
 
 ## Contacto
 
-Para una licencia comercial: abrir un asunto en el repositorio o escribir a la dirección
-publicada en el sitio del proyecto.
+Para una licencia comercial: **precinto@eleata.io**, o abrir un asunto en
+<https://github.com/hernaninverso/precinto/issues>.
+
+Si escribís porque tu producto genera paquetes de diagnóstico, decime cuál es y te mando el
+perfil de partida para tu formato. **No hace falta que mandes ningún paquete** — de hecho,
+preferiría que no lo hicieras: el sentido de esta herramienta es que tus datos no salgan de
+tu máquina, y eso me incluye a mí.

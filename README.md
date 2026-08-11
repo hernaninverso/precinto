@@ -98,6 +98,11 @@ determinista. Un modelo pequeño solo entra si supera esta línea de base en dat
 retenidos de otro sitio y otra fecha — y si no la supera, **se elimina**, no se conserva
 por marketing.
 
+## Contacto
+
+Licencias comerciales, fallos o desacuerdos con el enfoque: **precinto@eleata.io**
+o un asunto en el repositorio. No mandes paquetes de diagnóstico: no los quiero ver.
+
 ## Tests
 
 ```bash
