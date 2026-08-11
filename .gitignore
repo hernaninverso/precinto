@@ -1,5 +1,9 @@
+# Banco sintético: se regenera con `python3 make_canary_bundle.py --out demo`
+# (semilla fija => mismos valores). No se versiona porque contiene cadenas con
+# forma de credencial y dispararía los escáneres de secretos de cualquier
+# plataforma con un falso positivo perfectamente evitable.
+demo/
+
 claves/
-demo/salida/
-demo/salida_*/
 __pycache__/
 *.pyc
