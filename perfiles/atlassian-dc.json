@@ -1,0 +1,22 @@
+{
+  "name": "atlassian-dc",
+  "version": "0.1.0",
+  "description": "Jira / Confluence / Bitbucket Data Center — support.zip. Fuente: docs de 'Create a Support Zip' y la KB 'Anonymize Jira support zip data'. Atlassian limpia usuarios y contrasenas de los archivos de CONFIGURACION, pero su propia KB dice que en los LOGS puede quedar contenido sensible.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.keystore",
+    "*.key",
+    "id_rsa",
+    "id_ed25519",
+    "dbconfig.xml",
+    "server.xml",
+    "*.kdbx",
+    "*.crt",
+    "seraph-config.xml"
+  ],
+  "extra_terms": [],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

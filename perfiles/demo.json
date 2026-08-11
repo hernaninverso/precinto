@@ -1,0 +1,9 @@
+{
+  "name": "demo-fabricante",
+  "version": "0.1.0",
+  "description": "Perfil de demostración. Un perfil real se calibra por línea de producto con el fabricante.",
+  "deny_files": ["*.p12", "*.pfx", "*.jks", "*.keystore", "id_rsa", "id_ed25519", "*.key"],
+  "extra_terms": ["Proyecto Vulcano", "Metalúrgica Sarandí"],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

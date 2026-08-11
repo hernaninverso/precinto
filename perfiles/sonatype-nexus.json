@@ -1,0 +1,17 @@
+{
+  "name": "sonatype-nexus",
+  "version": "0.1.0",
+  "description": "Sonatype Nexus Repository — support zip generado desde Settings > Support. Se envia por correo o adjunto al ticket, sin paso intermedio de revision.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.key",
+    "*.pem",
+    "nexus.secrets.json",
+    "admin.password"
+  ],
+  "extra_terms": [],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

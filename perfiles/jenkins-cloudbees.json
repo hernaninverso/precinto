@@ -1,0 +1,19 @@
+{
+  "name": "jenkins-cloudbees",
+  "version": "0.1.0",
+  "description": "Jenkins / CloudBees CI — Support Core plugin. Ya anonimiza mapeando nombres a valores aleatorios, pero su propia documentacion pide revisar a mano plugins/active.txt y docker/Dockerfile para no revelar plugins propietarios.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.key",
+    "credentials.xml",
+    "secret.key",
+    "master.key",
+    "hudson.util.Secret",
+    "identity.key.enc"
+  ],
+  "extra_terms": [],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

@@ -1,0 +1,19 @@
+{
+  "name": "confluent",
+  "version": "0.1.0",
+  "description": "Confluent Platform — Diagnostics Bundling Tool. Sanea contrasenas y direcciones MAC, y su documentacion pide revisar TODA la salida antes de subirla. Tienen ademas una herramienta de redaccion de logs aparte.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.keystore",
+    "*.key",
+    "*.pem",
+    "jaas.conf",
+    "*_jaas.conf",
+    "credentials"
+  ],
+  "extra_terms": [],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

@@ -1,0 +1,17 @@
+{
+  "name": "gitpod",
+  "version": "0.1.0",
+  "description": "Gitpod self-hosted — support bundle generado con troubleshoot.sh. Su README dice que TRAS la fase de redaccion sigue siendo posible que queden datos sensibles, y recomienda revisar el tarball entero antes de subirlo.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.key",
+    "id_rsa",
+    "*.tfstate",
+    "kubeconfig",
+    "*.kubeconfig"
+  ],
+  "extra_terms": [],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

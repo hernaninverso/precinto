@@ -1,0 +1,18 @@
+{
+  "name": "elastic",
+  "version": "0.1.0",
+  "description": "Elastic — diagnostics de Agent/Fleet. Su documentacion dice que los diagnosticos 'pueden exponer datos sensibles que hay que redactar antes de compartirlos fuera de la organizacion', y que el archivo puede conservar metadatos que identifican al host.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.key",
+    "*.pem",
+    "elasticsearch.keystore",
+    "*.crt",
+    "service_tokens"
+  ],
+  "extra_terms": [],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

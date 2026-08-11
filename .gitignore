@@ -1,0 +1,5 @@
+claves/
+demo/salida/
+demo/salida_*/
+__pycache__/
+*.pyc

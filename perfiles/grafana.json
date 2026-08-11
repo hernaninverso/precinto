@@ -1,0 +1,17 @@
+{
+  "name": "grafana",
+  "version": "0.1.0",
+  "description": "Grafana OSS / Enterprise / Alloy — support bundle. Su documentacion subraya que todo va en TEXTO PLANO 'para que pueda inspeccionarse antes de compartirlo'. Hay ademas un pedido abierto de firmar el bundle (alloy#500, agent#2796).",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.key",
+    "grafana.db",
+    "*.crt",
+    "provisioning/**/*.yaml"
+  ],
+  "extra_terms": [],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

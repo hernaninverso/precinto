@@ -1,0 +1,17 @@
+{
+  "name": "coder",
+  "version": "0.1.0",
+  "description": "Coder — support bundle. Su documentacion advierte que 'agent/workspace_files/' puede contener tokens, credenciales y codigo fuente, y que pese a la redaccion automatica el paquete puede seguir teniendo datos que la organizacion considere sensibles.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.key",
+    "id_rsa",
+    "id_ed25519",
+    "*.tfstate",
+    "*.tfvars"
+  ],
+  "extra_terms": [],
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}
