@@ -285,6 +285,123 @@ def test_profile_is_closed():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_fail_closed():
+    """Los fail-open que encontró la auditoría de codex. Cada uno reproducido."""
+    print("\nFAIL-CLOSED (hallazgos de la auditoría)")
+    d = tmpdir()
+    try:
+        def perfil(**kw):
+            p = json.loads(json.dumps(bg.DEFAULT_PROFILE)); p.update(kw)
+            path = os.path.join(d, "p.json")
+            with open(path, "w") as fh: json.dump(p, fh)
+            return path
+
+        pol = dict(bg.DEFAULT_PROFILE["severity_policy"]); pol["critical"] = "allow"
+        ok = False
+        try: bg.load_profile(perfil(severity_policy=pol))
+        except ValueError: ok = True
+        check("perfil con accion 'allow' -> rechazado (dejaba el token intacto y daba PASS)", ok)
+
+        pol2 = dict(bg.DEFAULT_PROFILE["severity_policy"]); del pol2["low"]
+        ok = False
+        try: bg.load_profile(perfil(severity_policy=pol2))
+        except ValueError: ok = True
+        check("perfil con una severidad sin declarar -> rechazado", ok)
+
+        ok = False
+        try: bg.load_profile(perfil(block_uninspectable=False))
+        except ValueError: ok = True
+        check("block_uninspectable=false -> rechazado (era fail-open)", ok)
+
+        ok = False
+        try: bg.load_profile(perfil(deny_files="no soy una lista"))
+        except ValueError: ok = True
+        check("deny_files con tipo equivocado -> rechazado", ok)
+
+        prof = bg.load_profile(None); ps = bg.Pseudonymizer()
+        ent = "Qk8fRt2aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abcdEF"
+        clean, f = bg.scan_text("sig: %s\n" % ent, "h.log", prof, ps, None)
+        check("un hallazgo MARCADO tambien se enmascara (antes salia en claro)",
+              ent not in clean and "REVISAR" in clean)
+
+        ok = False
+        try: bg.scan_text("x" * (bg.MAX_MEMBER_BYTES + 10), "big.log", prof, ps, None)
+        except bg.TooLargeToInspect: ok = True
+        check("texto mayor al limite -> TooLargeToInspect (antes copiaba la cola sin mirar)", ok)
+
+        name = bg._safe_name("ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8.png", ps)
+        check("un token en el NOMBRE del archivo no llega al manifiesto",
+              "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" not in name)
+
+        src = os.path.join(d, "bundle"); os.makedirs(src)
+        with open(os.path.join(d, "afuera.txt"), "w") as fh: fh.write("SECRETO EXTERNO")
+        os.symlink(os.path.join(d, "afuera.txt"), os.path.join(src, "link.txt"))
+        with open(os.path.join(src, "propio.log"), "w") as fh: fh.write("linea propia\n")
+        dst = os.path.join(d, "copia"); bg.copy_tree_no_symlinks(src, dst)
+        check("copiar un directorio NO sigue enlaces simbolicos (importaba archivos de afuera)",
+              os.path.exists(os.path.join(dst, "propio.log"))
+              and not os.path.exists(os.path.join(dst, "link.txt")))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_leaf_types():
+    print("\nLISTA BLANCA — tambien los TIPOS de las hojas")
+    d = tmpdir()
+    try:
+        priv, pub = bg.keygen(os.path.join(d, "k"))
+        env = bg.sign_envelope(_minimal_manifest(), priv)
+        for name, mut in [
+            ("un objeto colgado de 'status'", lambda e: e["manifest"].__setitem__("status", {"x": "PASS"})),
+            ("una lista colgada de 'rules_version'", lambda e: e["manifest"].__setitem__("rules_version", ["x"])),
+            ("un entero donde va una cadena", lambda e: e["manifest"]["tool"].__setitem__("name", 7)),
+            ("una cadena donde va un entero", lambda e: e["manifest"]["inventory"].__setitem__("inspected", "3")),
+            ("un booleano donde va un entero", lambda e: e["manifest"]["inventory"].__setitem__("blocked", True)),
+            ("limitations con un objeto adentro", lambda e: e["manifest"].__setitem__("limitations", [{"a": 1}])),
+        ]:
+            t = copy.deepcopy(env); mut(t)
+            code, _ = bg.verify_envelope(t, pub)
+            check(name + " -> rechazado", code == 2)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_no_network():
+    """La suite afirmaba 'cero red comprobado' y la comprobacion NO existia."""
+    print("\nCERO RED — comprobado, no prometido")
+    import socket
+    d = tmpdir()
+    guardados = (socket.socket, socket.create_connection, socket.getaddrinfo)
+    intentos = []
+
+    def bloqueado(*a, **k):
+        intentos.append(a)
+        raise AssertionError("intento de red durante el escaneo")
+    try:
+        src = os.path.join(d, "b"); os.makedirs(src)
+        with open(os.path.join(src, "a.log"), "w") as fh:
+            fh.write("token=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8\nmail=x@corp.de\n")
+        priv, _pub = bg.keygen(os.path.join(d, "k"))
+        socket.socket = bloqueado
+        socket.create_connection = bloqueado
+        socket.getaddrinfo = bloqueado
+
+        class A(object):
+            bundle = src; profile = None; out = os.path.join(d, "salida")
+            output_name = None; sign = priv
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = bg.cmd_scan(A())
+        check("un escaneo completo corre con los sockets deshabilitados", code in (0, 3, 4))
+        check("cero intentos de red durante el escaneo", not intentos)
+        env = json.load(open(os.path.join(d, "salida", "manifest.json")))
+        check("el manifiesto se emitio igual", env["manifest"]["status"] in ("PASS", "REVIEW", "BLOCKED"))
+    finally:
+        socket.socket, socket.create_connection, socket.getaddrinfo = guardados
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def _minimal_manifest():
     from collections import OrderedDict
     return OrderedDict([
@@ -319,6 +436,9 @@ if __name__ == "__main__":
     test_detection_and_correlation()
     test_manifest_never_leaks()
     test_profile_is_closed()
+    test_fail_closed()
+    test_leaf_types()
+    test_no_network()
     print("\n" + "─" * 62)
     print("  %d en verde · %d en rojo" % (len(PASS), len(FAIL)))
     if FAIL:

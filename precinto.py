@@ -202,6 +202,11 @@ class Pseudonymizer(object):
             self._seen[key] = "<%s:%s>" % (cls.upper(), digest)
         return self._seen[key]
 
+    def review_token(self, cls, value):
+        """Marca de revisión: tapa el valor igual que un pseudónimo, pero se
+        distingue a simple vista para que una persona sepa qué mirar."""
+        return "<REVISAR:%s:%s>" % (cls.upper(), self.fingerprint(cls, value))
+
     def fingerprint(self, cls, value):
         """Huella para el manifiesto. Salada => no permite fuerza bruta offline."""
         return hmac.new(self._salt, (cls + "\x00" + value).encode("utf-8"),
@@ -233,6 +238,13 @@ DEFAULT_PROFILE = OrderedDict([
 ])
 
 
+VALID_SEVERITIES = {SEV_CRITICAL, SEV_HIGH, SEV_MEDIUM, SEV_LOW}
+# Un perfil NO puede pedir que un hallazgo se deje pasar. Sin esta lista, un
+# perfil con {"severity_policy":{"critical":"allow"}} dejaba el token intacto y
+# el resultado seguía siendo PASS: fail-open silencioso por configuración.
+VALID_ACTIONS = {ACT_PSEUDONYMIZE, ACT_REVIEW}
+
+
 def load_profile(path):
     if path is None:
         return json.loads(json.dumps(DEFAULT_PROFILE))
@@ -244,7 +256,40 @@ def load_profile(path):
             raise ValueError("El perfil tiene una clave desconocida: %r. "
                              "El perfil es una lista blanca cerrada." % k)
         merged[k] = v
+    _validate_profile(merged)
     return merged
+
+
+def _validate_profile(p):
+    """Valida VALORES, no solo nombres de clave. Todo lo que no se entienda, se rechaza."""
+    pol = p.get("severity_policy")
+    if not isinstance(pol, dict):
+        raise ValueError("severity_policy debe ser un objeto.")
+    for k, v in pol.items():
+        if k not in VALID_SEVERITIES:
+            raise ValueError("severity_policy: severidad desconocida %r (válidas: %s)"
+                             % (k, ", ".join(sorted(VALID_SEVERITIES))))
+        if v not in VALID_ACTIONS:
+            raise ValueError("severity_policy[%r]: acción %r no permitida. Un perfil no "
+                             "puede dejar pasar un hallazgo; válidas: %s"
+                             % (k, v, ", ".join(sorted(VALID_ACTIONS))))
+    for sev in VALID_SEVERITIES:
+        if sev not in pol:
+            raise ValueError("severity_policy: falta la severidad %r. Debe declararse "
+                             "explícitamente qué se hace con cada una." % sev)
+    for key in ("deny_files", "allow_extra_text_ext", "extra_terms"):
+        v = p.get(key)
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise ValueError("%s debe ser una lista de cadenas." % key)
+    if not isinstance(p.get("entropy_min_bits"), (int, float)):
+        raise ValueError("entropy_min_bits debe ser un número.")
+    if p.get("block_uninspectable") is not True:
+        raise ValueError("block_uninspectable no puede desactivarse: un archivo que no se "
+                         "puede inspeccionar no puede salir. La opción existe solo para que "
+                         "el perfil lo declare de forma explícita.")
+    for key in ("name", "version", "description"):
+        if not isinstance(p.get(key), str):
+            raise ValueError("%s debe ser una cadena." % key)
 
 
 def sha256_file(path):
@@ -266,6 +311,14 @@ class UnsafeArchive(Exception):
     pass
 
 
+class TooLargeToInspect(Exception):
+    """El contenido excede lo que se puede analizar con garantías -> se bloquea."""
+
+    def __init__(self, size):
+        super(TooLargeToInspect, self).__init__("contenido de %d bytes" % size)
+        self.size = size
+
+
 def _safe_relpath(name):
     """Rechaza rutas absolutas, traversal y separadores raros."""
     if not name or name.startswith("/") or name.startswith("\\"):
@@ -276,6 +329,40 @@ def _safe_relpath(name):
     if any(p == ".." for p in parts):
         raise UnsafeArchive("path traversal en el archivo: %r" % name)
     return os.path.join(*[p for p in parts if p not in ("", ".")]) if parts else name
+
+
+def copy_tree_no_symlinks(src, dest):
+    """Copia un directorio SIN seguir enlaces simbólicos y con los mismos límites
+    que un archivo comprimido.
+
+    `shutil.copytree(symlinks=False)` hace lo CONTRARIO de lo que sugiere el nombre:
+    no preserva el enlace, sigue el destino y copia su contenido. Un enlace dentro
+    del paquete apuntando a `/etc` o a otro directorio del sistema metía archivos
+    ajenos en la copia "saneada". Verificado reproduciendo el caso.
+    """
+    total = 0
+    count = 0
+    src = os.path.abspath(src)
+    for dirpath, dirnames, filenames in os.walk(src, followlinks=False):
+        dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            if os.path.islink(full):
+                continue                      # el enlace no se sigue ni se copia
+            count += 1
+            if count > MAX_MEMBERS:
+                raise UnsafeArchive("demasiados archivos en el directorio (>%d)" % MAX_MEMBERS)
+            size = os.path.getsize(full)
+            if size > MAX_MEMBER_BYTES:
+                raise UnsafeArchive("archivo demasiado grande: %r" % fn)
+            total += size
+            if total > MAX_EXPANDED_BYTES:
+                raise UnsafeArchive("el directorio excede el tamaño total admitido")
+            rel = os.path.relpath(full, src)
+            out = os.path.join(dest, rel)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            shutil.copyfile(full, out, follow_symlinks=False)
+    return total
 
 
 def extract_tar(src, dest):
@@ -348,8 +435,7 @@ def materialize(src, workdir):
     root = os.path.join(workdir, "input")
     os.makedirs(root, exist_ok=True)
     if os.path.isdir(src):
-        shutil.copytree(src, os.path.join(root, os.path.basename(os.path.abspath(src))),
-                        symlinks=False, ignore_dangling_symlinks=True)
+        copy_tree_no_symlinks(src, os.path.join(root, os.path.basename(os.path.abspath(src))))
         return root, "directory"
     size = os.path.getsize(src)
     if size > MAX_ARCHIVE_BYTES:
@@ -453,9 +539,11 @@ def scan_text(text, relpath, profile, pseudo, extra_terms_rx):
     findings = []
     policy = profile["severity_policy"]
     if len(text) > MAX_MEMBER_BYTES:
-        text_head, text_tail = text[:MAX_MEMBER_BYTES], text[MAX_MEMBER_BYTES:]
-    else:
-        text_head, text_tail = text, ""
+        # Antes se analizaba solo el principio y la cola se copiaba SIN MIRAR a la
+        # salida: un secreto pasado el límite salía intacto. Ahora es el llamador
+        # quien decide, y lo que decide es bloquear el archivo entero.
+        raise TooLargeToInspect(len(text))
+    text_head, text_tail = text, ""
 
     spans = []  # (inicio, fin, reemplazo, cls, severidad, accion, huella)
 
@@ -468,7 +556,12 @@ def scan_text(text, relpath, profile, pseudo, extra_terms_rx):
             action = policy.get(det.severity, ACT_REVIEW)
             start, end = (m.span(gi) if gi else m.span(0))
             fp = pseudo.fingerprint(det.cls, value)
-            repl = pseudo.token(det.cls, value) if action == ACT_PSEUDONYMIZE else None
+            # TODO hallazgo se enmascara, incluido el marcado para revisión. Antes,
+            # un hallazgo REVIEW dejaba el valor ORIGINAL en la copia: el archivo
+            # "saneado" salía con el dato en claro y el estado solo cambiaba el
+            # código de salida. La revisión decide si se RESTAURA, no si se tapa.
+            repl = (pseudo.token(det.cls, value) if action == ACT_PSEUDONYMIZE
+                    else pseudo.review_token(det.cls, value))
             spans.append((start, end, repl, det.cls, det.severity, action, fp))
 
     if extra_terms_rx is not None:
@@ -490,7 +583,8 @@ def scan_text(text, relpath, profile, pseudo, extra_terms_rx):
             continue
         if shannon_entropy(val) < profile["entropy_min_bits"]:
             continue
-        spans.append((s, e, None, "high_entropy_string", SEV_MEDIUM,
+        spans.append((s, e, pseudo.review_token("high_entropy_string", val),
+                      "high_entropy_string", SEV_MEDIUM,
                       ACT_REVIEW, pseudo.fingerprint("high_entropy_string", val)))
 
     if not spans:
@@ -587,8 +681,24 @@ ENVELOPE_SCHEMA = {
 }
 
 
+LEAF_TYPES = {
+    "manifest_format": str, "generated_utc": str, "rules_version": str, "status": str,
+    "name": str, "version": str, "sha256": str, "mode": str, "bytes": int,
+    "files_total": int, "inspected": int, "blocked": int, "empty": int,
+    "bytes_inspected": int, "bytes_not_inspected": int, "percent_inspected_bp": int,
+    "class": str, "file": str, "line": int, "severity": str, "action": str,
+    "fingerprint": str, "reason": str,
+    "algorithm": str, "public_key_raw_b64": str, "value_b64": str,
+}
+
+
 def validate_closed(obj, schema, path="$"):
-    """Rechaza cualquier clave no declarada, en todos los niveles."""
+    """Rechaza cualquier clave no declarada Y cualquier hoja con el tipo equivocado.
+
+    Sin la comprobación de tipos, `"status": {"campo_inventado": "PASS"}` pasaba: la
+    lista blanca miraba los nombres pero no el contenido de las hojas, así que se
+    podían colgar objetos arbitrarios de un campo escalar.
+    """
     errors = []
     if "__keys__" in schema:
         if not isinstance(obj, dict):
@@ -604,6 +714,19 @@ def validate_closed(obj, schema, path="$"):
             if k == "__keys__" or k not in obj:
                 continue
             errors.extend(validate_closed(obj[k], sub, "%s.%s" % (path, k)))
+        for k in sorted(allowed & set(obj.keys())):
+            if k in schema:
+                continue
+            exp = LEAF_TYPES.get(k)
+            v = obj[k]
+            if exp is int and isinstance(v, bool):
+                errors.append("%s.%s: booleano donde se esperaba un entero" % (path, k))
+            elif exp is not None and not isinstance(v, exp):
+                errors.append("%s.%s: se esperaba %s y llegó %s"
+                              % (path, k, exp.__name__, type(v).__name__))
+            elif exp is None and k == "limitations":
+                if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                    errors.append("%s.%s: debe ser una lista de cadenas" % (path, k))
     if "__item__" in schema:
         if not isinstance(obj, list):
             return errors + ["%s: se esperaba una lista" % path]
@@ -625,7 +748,10 @@ def verify_envelope(env, public_pem_path=None):
         out.extend("   · " + e for e in errs)
         return 2, out
 
-    sig = base64.b64decode(env["signature"]["value_b64"])
+    try:
+        sig = base64.b64decode(env["signature"]["value_b64"], validate=True)
+    except Exception:
+        return 2, ["Firma con base64 inválido."]
     if env["signature"]["algorithm"] != "Ed25519":
         return 2, ["Algoritmo de firma no admitido: %r" % env["signature"]["algorithm"]]
 
@@ -657,6 +783,34 @@ def verify_envelope(env, public_pem_path=None):
 # ─────────────────────────────────────────────────────────────────────────────
 # Comando: scan
 # ─────────────────────────────────────────────────────────────────────────────
+def _safe_name(name, pseudo):
+    """Sanea un nombre de archivo o de paquete antes de escribirlo en el manifiesto.
+
+    El manifiesto se publica. Un archivo llamado `ghp_<token>.png` se bloquea
+    entero — correcto — pero su NOMBRE terminaba literalmente en
+    `blocked_files[].file`, contradiciendo "el manifiesto nunca contiene el valor
+    de un secreto". Las rutas también llevan nombres de usuario y de cliente.
+    """
+    out = name
+    for det in DETECTORS:
+        if det.severity not in (SEV_CRITICAL, SEV_HIGH):
+            continue
+        def _sub(m, d=det):
+            gi = d.group
+            v = m.group(gi) if gi else m.group(0)
+            if not v or _noise(d.cls, v):
+                return m.group(0)
+            tok = pseudo.token(d.cls, v)
+            return m.group(0).replace(v, tok) if gi else tok
+        out = det.rx.sub(_sub, out)
+    for m in list(HIGH_ENTROPY_RX.finditer(out))[::-1]:
+        v = m.group(1)
+        if not is_placeholder(v) and not v.isalpha() and not v.isdigit() \
+                and shannon_entropy(v) >= 4.2:
+            out = out[:m.start(1)] + pseudo.review_token("high_entropy_string", v) + out[m.end(1):]
+    return out
+
+
 def build_terms_rx(terms):
     terms = [t for t in (terms or []) if t and len(t) >= 3]
     if not terms:
@@ -676,6 +830,15 @@ def cmd_scan(args):
     terms_rx = build_terms_rx(profile.get("extra_terms"))
 
     outdir = os.path.abspath(args.out)
+    # "Nunca modifica el original" era falso con `scan ./b --out ./b/salida`:
+    # se creaba y escribía dentro del propio paquete de entrada.
+    try:
+        inside = os.path.commonpath([os.path.abspath(src), outdir]) == os.path.abspath(src)
+    except ValueError:
+        inside = False
+    if os.path.isdir(src) and inside:
+        die("--out (%s) está dentro de la entrada (%s). La salida no puede escribirse "
+            "dentro del paquete original." % (outdir, src))
     os.makedirs(outdir, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix="precinto-")
     sanitized_root = os.path.join(workdir, "sanitized")
@@ -704,29 +867,50 @@ def cmd_scan(args):
                     continue
 
                 verdict, reason = classify(rel, abspath, profile)
-                if verdict == "block" and profile["block_uninspectable"]:
-                    blocked.append(OrderedDict([("file", rel), ("reason", reason),
-                                                ("bytes", size)]))
+                if verdict == "block":
+                    blocked.append(OrderedDict([("file", _safe_name(rel, pseudo)),
+                                                ("reason", reason), ("bytes", size)]))
                     bytes_blocked += size
                     continue
 
+                if size > MAX_MEMBER_BYTES:
+                    blocked.append(OrderedDict([("file", _safe_name(rel, pseudo)),
+                                                ("reason", "excede el tamaño inspeccionable"),
+                                                ("bytes", size)]))
+                    bytes_blocked += size
+                    continue
                 with open(abspath, "rb") as fh:
                     raw = fh.read()
                 text = raw.decode("utf-8", errors="replace")
-                clean, f = scan_text(text, rel, profile, pseudo, terms_rx)
+                try:
+                    clean, f = scan_text(text, _safe_name(rel, pseudo), profile,
+                                         pseudo, terms_rx)
+                except TooLargeToInspect:
+                    blocked.append(OrderedDict([("file", _safe_name(rel, pseudo)),
+                                                ("reason", "excede el tamaño inspeccionable"),
+                                                ("bytes", size)]))
+                    bytes_blocked += size
+                    continue
                 findings.extend(f)
                 n_inspected += 1
                 bytes_inspected += size
                 _copy_into(sanitized_root, rel, clean.encode("utf-8"))
 
-        out_name = args.output_name or (_base_no_ext(src) + ".sanitized.tar.gz")
-        out_path = os.path.join(outdir, out_name)
-        _pack(sanitized_root, out_path)
-
         total_bytes = bytes_inspected + bytes_blocked
         pct = (100.0 * bytes_inspected / total_bytes) if total_bytes else 100.0
         needs_review = [f for f in findings if f.action == ACT_REVIEW]
         status = "BLOCKED" if blocked else ("REVIEW" if needs_review else "PASS")
+
+        # El nombre declara el estado. Antes salía siempre `*.sanitized.tar.gz`,
+        # con lo que un paquete con decisiones pendientes era indistinguible de uno
+        # liberado: alguien lo adjuntaba y listo. Lo que no pasó, no sale con
+        # nombre de "listo para enviar".
+        sufijo = {"PASS": ".saneado.tar.gz",
+                  "REVIEW": ".RETENIDO-requiere-revision.tar.gz",
+                  "BLOCKED": ".RETENIDO-con-bloqueos.tar.gz"}[status]
+        out_name = args.output_name or (_base_no_ext(src) + sufijo)
+        out_path = os.path.join(outdir, out_name)
+        _pack(sanitized_root, out_path)
 
         limitations = [
             "La detección es best-effort: NO se garantiza haber encontrado toda la "
@@ -746,15 +930,15 @@ def cmd_scan(args):
             ("manifest_format", MANIFEST_FORMAT),
             ("tool", OrderedDict([("name", TOOL_NAME), ("version", TOOL_VERSION)])),
             ("generated_utc", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
-            ("input", OrderedDict([("name", os.path.basename(src)),
+            ("input", OrderedDict([("name", _safe_name(os.path.basename(src), pseudo)),
                                    ("sha256", sha256_file(src) if os.path.isfile(src) else ""),
                                    ("bytes", os.path.getsize(src) if os.path.isfile(src) else 0),
                                    ("mode", mode)])),
-            ("output", OrderedDict([("name", os.path.basename(out_path)),
+            ("output", OrderedDict([("name", _safe_name(os.path.basename(out_path), pseudo)),
                                     ("sha256", sha256_file(out_path)),
                                     ("bytes", os.path.getsize(out_path))])),
-            ("profile", OrderedDict([("name", profile["name"]),
-                                     ("version", profile["version"]),
+            ("profile", OrderedDict([("name", _safe_name(profile["name"], pseudo)),
+                                     ("version", _safe_name(profile["version"], pseudo)),
                                      ("sha256", profile_sha)])),
             ("rules_version", RULES_VERSION),
             ("inventory", OrderedDict([("files_total", n_files), ("inspected", n_inspected),

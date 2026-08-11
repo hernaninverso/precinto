@@ -41,8 +41,9 @@ De `verify`: `0` procedencia probada · `2` inválido · `3` integridad sí, pro
 ## Invariantes
 
 1. **Nunca modifica el original.** Siempre escribe una copia nueva.
-2. **Cero red, cero credenciales, cero subprocesos.** Comprobado en los tests corriendo
-   el escaneo completo con los sockets deshabilitados a nivel de proceso.
+2. **Cero red, cero subprocesos, ninguna credencial de servicio.** Hay un test que corre
+   un escaneo completo con `socket.socket`, `create_connection` y `getaddrinfo` anulados y
+   falla si algo intenta usarlos. La única clave que toca es la tuya, local, al firmar.
 3. **El manifiesto nunca contiene el valor de un secreto** — solo clase, ubicación y una
    huella salada e irreversible.
 4. **Lista blanca cerrada** en el sobre firmado, en todos los niveles: raíz, sub-bloques
@@ -106,5 +107,6 @@ o un asunto en el repositorio. No mandes paquetes de diagnóstico: no los quiero
 ## Tests
 
 ```bash
-python3 test_precinto.py     # 32 comprobaciones, sin red ni dependencias externas
+python3 test_precinto.py       # 49 comprobaciones
+node test_verificador_web.js   # 26 sobre el verificador del navegador
 ```

@@ -83,6 +83,25 @@ function check(name, cond) {
   check("esa misma firma SÍ valida con la clave del tercero (la implementación no está rota)",
     await V.ed25519Verify(otra, msg, rawOtra));
 
+  console.log("\nPUNTOS MALICIOSOS (hallazgos de la auditoría)");
+  {
+    const ident = new Uint8Array(32); ident[0] = 1;      // punto identidad
+    const sigU = new Uint8Array(64); sigU.set(ident, 0); // R = identidad, S = 0
+    const otro = new TextEncoder().encode("un mensaje que nadie firmó jamás");
+    check("clave identidad + R identidad + S=0 -> RECHAZADA (era firma universal)",
+      !(await V.ed25519Verify(sigU, otro, ident)));
+    check("...y tampoco vale contra el manifiesto real",
+      !(await V.ed25519Verify(sigU, msg, ident)));
+    const noCanon = new Uint8Array(32); noCanon[0] = 1; noCanon[31] |= 0x80;
+    check("codificación prohibida x=0 con bit de signo 1 -> RECHAZADA",
+      !(await V.ed25519Verify(sigU, msg, noCanon)));
+    const yGrande = new Uint8Array(32).fill(0xff); yGrande[31] = 0x7f;
+    check("y >= p (no canónico) -> RECHAZADA",
+      !(await V.ed25519Verify(sig, msg, yGrande)));
+    check("la clave legítima sigue validando (no se rompió nada)",
+      await V.ed25519Verify(sig, msg, rawPem));
+  }
+
   console.log("\nLISTA BLANCA CERRADA");
   const cases = [
     ["campo extra en la raíz", e => { e.certified_by = "un organismo"; }],
@@ -97,6 +116,19 @@ function check(name, cond) {
     check(name + " rechazado", V.validateClosed(t, V.SCHEMA).length > 0);
   }
   check("el sobre intacto pasa la validación", V.validateClosed(env, V.SCHEMA).length === 0);
+
+  console.log("\nTIPOS DE LAS HOJAS");
+  for (const [name, mutate] of [
+    ["un objeto colgado de 'status'", e => { e.manifest.status = { x: "PASS" }; }],
+    ["una lista colgada de 'rules_version'", e => { e.manifest.rules_version = ["x"]; }],
+    ["un entero donde va una cadena", e => { e.manifest.tool.name = 7; }],
+    ["una cadena donde va un entero", e => { e.manifest.inventory.inspected = "3"; }],
+    ["un flotante donde va un entero", e => { e.manifest.coverage.percent_inspected_bp = 1.5; }],
+    ["limitations con un objeto adentro", e => { e.manifest.limitations = [{ a: 1 }]; }],
+  ]) {
+    const t = JSON.parse(JSON.stringify(env)); mutate(t);
+    check(name + " rechazado", V.validateClosed(t, V.SCHEMA).length > 0);
+  }
 
   console.log("\n" + "─".repeat(58));
   console.log("  " + ok + " en verde · " + bad + " en rojo\n");

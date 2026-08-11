@@ -59,7 +59,7 @@
 </style>
 <div class="wrap">
 <p class="brand">Precinto</p>
-<h1>El paquete de diagnóstico sale con un sello,<br>o no sale.</h1>
+<h1>El paquete de diagnóstico sale con un sello,<br>o sale marcado como retenido.</h1>
 <p class="lede">Precinto sanea el <em>support bundle</em> antes de que cruce el perímetro y emite un manifiesto firmado de lo que hizo y de lo que <strong>no pudo</strong> inspeccionar. Corre en tu máquina, sin red, sin credenciales y sin telemetría.</p>
 
 <div class="claim">
@@ -96,8 +96,8 @@ python3 precinto.py scan support-bundle.tar.gz \
 <h3>Y qué no hace, nunca</h3>
 <ul>
   <li>No modifica el original. Siempre escribe una copia nueva.</li>
-  <li>No abre sockets. Comprobado en la suite corriendo el escaneo entero con la red deshabilitada a nivel de proceso, no por promesa.</li>
-  <li>No pide credenciales ni lanza subprocesos.</li>
+  <li>No abre sockets. Comprobado <em>en la suite</em>: hay un test que corre un escaneo completo con <code>socket.socket</code>, <code>create_connection</code> y <code>getaddrinfo</code> anulados, y falla si algo intenta usarlos.</li>
+  <li>No pide credenciales de ningún servicio y no lanza subprocesos. La única clave que toca es la tuya, local, y sólo si le pedís firmar.</li>
   <li>No manda estadísticas, ni de uso ni anónimas.</li>
   <li>No comprueba licencias contra un servidor. Nada llama a casa.</li>
 </ul>
@@ -107,7 +107,7 @@ python3 precinto.py scan support-bundle.tar.gz \
   <thead><tr><th>Situación</th><th>Qué pasa</th></tr></thead>
   <tbody>
     <tr><td>Una credencial reconocida por una regla exacta</td><td>Se reemplaza por un pseudónimo estable</td></tr>
-    <tr><td>Una cadena ambigua, de alta entropía</td><td>Se <strong>marca para revisión humana</strong>. No se borra: podría ser un identificador de compilación que hace falta para el diagnóstico</td></tr>
+    <tr><td>Una cadena ambigua, de alta entropía</td><td>Se <strong>enmascara igual</strong> y se marca con <code>&lt;REVISAR:…&gt;</code>. La revisión decide si se <em>restaura</em>, no si se tapa: dejar el valor en claro mientras alguien decide era dejarlo salir</td></tr>
     <tr><td>Un formato que no se puede inspeccionar con garantías</td><td>El archivo se <strong>bloquea entero</strong>. No sale</td></tr>
     <tr><td>Una traza de diagnóstico legítima</td><td>Queda intacta. Anonimizar destruyendo el diagnóstico no sirve a nadie</td></tr>
   </tbody>
@@ -121,20 +121,28 @@ python3 precinto.py scan support-bundle.tar.gz \
   <p>Verificar una firma contra la clave que viaja <em>dentro del mismo archivo</em> es circular: demuestra que nadie lo alteró, pero cualquiera pudo firmarlo con su propia clave. Por eso Precinto devuelve <strong>NO PROBADA</strong> en ese caso, con código de salida 3, y nunca la palabra «verificada».</p>
   <p style="margin-top:10px">Para probar la procedencia hace falta la clave pública del emisor obtenida por un canal <strong>independiente</strong> del archivo. Es una distinción incómoda de explicar y fácil de omitir — y omitirla es exactamente cómo una herramienta de verificación termina certificando lo que no puede.</p>
 </div>
+<p>Y hay tres cosas más que una firma válida <strong>no</strong> demuestra, dichas antes de que las pregunte nadie:</p>
+<ul>
+  <li><strong>No demuestra que el paquete adjunto sea el descrito</strong>, salvo que compares el sha256. El verificador acepta también el <code>.tar.gz</code> y lo comprueba; sin ese paso, un manifiesto en verde puede viajar junto a cualquier otro archivo.</li>
+  <li><strong>No demuestra que Precinto se haya ejecutado.</strong> Demuestra que quien tiene la clave firmó esas afirmaciones.</li>
+  <li><strong>No demuestra que no queden datos sensibles.</strong> Eso no lo demuestra nada, y por eso no se promete.</li>
+</ul>
 
 <h2>Medido, no prometido</h2>
 <div class="tw"><table>
   <thead><tr><th>Sobre el banco sintético de canarios</th><th class="n"></th></tr></thead>
   <tbody>
     <tr><td>Canarios plantados, en 14 clases</td><td class="n">17</td></tr>
-    <tr><td>Neutralizados — reemplazados por pseudónimo</td><td class="n">15</td></tr>
+    <tr><td>Neutralizados — reemplazados por pseudónimo</td><td class="n">16</td></tr>
     <tr><td>Retenidos — su archivo se bloqueó entero</td><td class="n">1</td></tr>
-    <tr><td>Marcados para revisión humana</td><td class="n">1</td></tr>
-    <tr><td><strong>Escapados</strong></td><td class="n"><strong>0</strong></td></tr>
-    <tr><td>Comprobaciones de regresión (Python + verificador web)</td><td class="n">47</td></tr>
+    <tr><td><strong>Escapados</strong> — presentes en la copia sin marcar</td><td class="n"><strong>0</strong></td></tr>
+    <tr><td>Comprobaciones de regresión (Python + verificador web)</td><td class="n">75</td></tr>
   </tbody>
 </table></div>
-<p>El banco está en el repositorio y se regenera con semilla fija: cualquiera reproduce estos números en su máquina en menos de un minuto. Y el desglose es de cuatro estados, no de dos, porque un banco que solo dice «contenido / no contenido» se felicita a sí mismo — la primera versión de éste informaba 100% sin haber medido nada.</p>
+<p>El banco está en el repositorio y se regenera con semilla fija: cualquiera reproduce estos números en su máquina en menos de un minuto. Y el desglose distingue estados en vez de decir «contenido / no contenido», porque un banco binario se felicita a sí mismo — la primera versión de éste informaba 100% sin haber medido nada.</p>
+<div class="box warn">
+  <p><strong>Estos números son de un banco sintético, no de datos reales.</strong> Miden que los detectores encuentran lo que se les plantó; no miden qué encontrarían en tus paquetes, que es la única pregunta que importa. Por eso el paso siguiente con un fabricante es correrlo sobre <em>su</em> corpus, en <em>su</em> máquina.</p>
+</div>
 
 <h2 id="licencia">Licencia</h2>
 <div class="tw"><table>

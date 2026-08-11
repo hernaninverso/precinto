@@ -78,6 +78,12 @@
   <input type="file" id="file" accept=".json,application/json">
 </div>
 
+<div class="drop" id="drop2" role="button" tabindex="0" style="margin-top:14px">
+  <p><strong>Opcional: arrastrá también el paquete</strong> (<code>.tar.gz</code>)</p>
+  <p style="margin-top:6px">para comprobar que el precinto corresponde a <em>ese</em> archivo</p>
+  <input type="file" id="file2">
+</div>
+
 <label class="f">Clave pública <span>— opcional, pero es lo único que prueba la procedencia</span>
   <textarea id="pk" placeholder="Pegá acá la clave pública en PEM, obtenida por un canal INDEPENDIENTE del archivo (el sitio del proveedor, un correo firmado, un contrato).&#10;&#10;-----BEGIN PUBLIC KEY-----&#10;...&#10;-----END PUBLIC KEY-----"></textarea>
 </label>
@@ -147,16 +153,30 @@ function ptEq(p1, p2) {           // comparación en proyectivas, sin invertir
 
 function leToBig(bytes) { let n = 0n; for (let i = bytes.length - 1; i >= 0; i--) n = (n << 8n) | BigInt(bytes[i]); return n; }
 
+const IDENT = [0n, 1n, 1n, 0n];
+
 function decodePoint(bytes) {
   if (bytes.length !== 32) return null;
   const n = leToBig(bytes);
   const y = n & ((1n << 255n) - 1n);
   const sign = (n >> 255n) & 1n;
-  if (y >= P) return null;
+  if (y >= P) return null;                 // y no canónico
   let x = xRecover(y);
   if (x === null) return null;
+  // RFC 8032 §5.1.3: si x = 0 y el bit de signo es 1, la decodificación FALLA.
+  // Sin esta comprobación se aceptaba una codificación prohibida.
+  if (x === 0n && sign === 1n) return null;
   if ((x & 1n) !== sign) x = mod(P - x);
   return [x, y, 1n, mod(x * y)];
+}
+
+/* Rechaza la identidad y todo punto fuera del subgrupo de orden primo.
+   Sin esto, con clave pública identidad, R identidad y S = 0 la ecuación de
+   verificación se cumple para CUALQUIER mensaje: la página daba "Verificada"
+   a una firma universalmente falsificable. Verificado reproduciendo el caso. */
+function inPrimeOrderSubgroup(p) {
+  if (ptEq(p, IDENT)) return false;        // orden 1
+  return ptEq(ptMul(p, L), IDENT);         // [L]P == identidad  =>  orden | L
 }
 
 async function sha512(u8) {
@@ -168,6 +188,8 @@ async function ed25519Verify(sig, msg, pub) {
   if (sig.length !== 64 || pub.length !== 32) return false;
   const A = decodePoint(pub);            if (!A) return false;
   const R = decodePoint(sig.slice(0, 32)); if (!R) return false;
+  if (!inPrimeOrderSubgroup(A)) return false;      // clave de orden bajo
+  if (!inPrimeOrderSubgroup(R)) return false;      // R de orden bajo
   const S = leToBig(sig.slice(32, 64));
   if (S >= L) return false;                        // maleabilidad: S debe ser canónico
   const k = mod(leToBig(await sha512(concat(sig.slice(0, 32), pub, msg))), L);
@@ -241,6 +263,16 @@ const SCHEMA = {
   },
 };
 
+const LEAF_TYPES = {
+  manifest_format:"string", generated_utc:"string", rules_version:"string", status:"string",
+  name:"string", version:"string", sha256:"string", mode:"string", bytes:"number",
+  files_total:"number", inspected:"number", blocked:"number", empty:"number",
+  bytes_inspected:"number", bytes_not_inspected:"number", percent_inspected_bp:"number",
+  class:"string", file:"string", line:"number", severity:"string", action:"string",
+  fingerprint:"string", reason:"string",
+  algorithm:"string", public_key_raw_b64:"string", value_b64:"string",
+};
+
 function validateClosed(obj, schema, path = "$") {
   const errs = [];
   if (schema.__keys__) {
@@ -253,6 +285,18 @@ function validateClosed(obj, schema, path = "$") {
       if (!(k in obj)) errs.push(path + "." + k + ": campo obligatorio ausente");
     for (const k of Object.keys(schema))
       if (k !== "__keys__" && k in obj) errs.push(...validateClosed(obj[k], schema[k], path + "." + k));
+    // Tipos de las hojas: sin esto, `"status": {"x":"PASS"}` pasaba la validación.
+    for (const k of Object.keys(obj)) {
+      if (!allowed.has(k) || k in schema) continue;
+      const exp = LEAF_TYPES[k];
+      if (exp && typeof obj[k] !== exp)
+        errs.push(path + "." + k + ": se esperaba " + exp + " y llegó " + typeof obj[k]);
+      if (exp === "number" && typeof obj[k] === "number" && !Number.isInteger(obj[k]))
+        errs.push(path + "." + k + ": el formato solo admite enteros");
+      if (k === "limitations" &&
+          (!Array.isArray(obj[k]) || !obj[k].every(x => typeof x === "string")))
+        errs.push(path + ".limitations: debe ser una lista de cadenas");
+    }
   }
   if (schema.__item__) {
     if (!Array.isArray(obj)) return errs.concat([path + ": se esperaba una lista"]);
@@ -276,11 +320,39 @@ drop.addEventListener("drop", e => {
 fileEl.addEventListener("change", () => { if (fileEl.files[0]) read(fileEl.files[0]); });
 pkEl.addEventListener("input", () => { if (LAST) run(LAST); });
 
-let LAST = null;
+let LAST = null, PAQUETE = null;
 function read(f) {
   const r = new FileReader();
   r.onload = () => { LAST = r.result; run(LAST); };
   r.readAsText(f);
+}
+
+/* Comprobar el PAQUETE, no sólo el papel. Una firma válida prueba que el
+   manifiesto no fue alterado; no prueba que el archivo que te mandaron sea el
+   que describe. Sin esta comprobación, un manifiesto en verde puede viajar
+   junto a cualquier otro tar. */
+const drop2 = $("#drop2"), file2 = $("#file2");
+drop2.addEventListener("click", () => file2.click());
+drop2.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") file2.click(); });
+drop2.addEventListener("dragover", e => { e.preventDefault(); drop2.classList.add("over"); });
+drop2.addEventListener("dragleave", () => drop2.classList.remove("over"));
+drop2.addEventListener("drop", e => {
+  e.preventDefault(); drop2.classList.remove("over");
+  if (e.dataTransfer.files[0]) leerPaquete(e.dataTransfer.files[0]);
+});
+file2.addEventListener("change", () => { if (file2.files[0]) leerPaquete(file2.files[0]); });
+
+async function leerPaquete(f) {
+  const buf = await f.arrayBuffer();
+  const h = await crypto.subtle.digest("SHA-256", buf);
+  PAQUETE = {
+    nombre: f.name,
+    sha256: Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, "0")).join(""),
+    bytes: f.size,
+  };
+  drop2.innerHTML = "<p><strong>" + esc(f.name) + "</strong></p><p style='margin-top:6px'>sha256 " +
+                    PAQUETE.sha256.slice(0, 24) + "…</p>";
+  if (LAST) run(LAST);
 }
 
 function card(kind, title, body) {
@@ -306,9 +378,10 @@ async function run(text) {
 
   const sigBlock = env.signature;
   if (sigBlock.algorithm === "none") {
-    res.innerHTML = card("warn", "Sin firmar",
+    res.innerHTML = card("bad", "Sin firmar — no verificable",
       "<p>Este manifiesto se generó sin la opción <code>--sign</code>. Describe un proceso, " +
-      "pero nada impide que haya sido alterado después de emitirse.</p>") + summary(env.manifest);
+      "pero <strong>nada impide que haya sido alterado</strong> después de emitirse: no hay " +
+      "nada que comprobar. Trátalo como texto sin respaldo.</p>") + summary(env.manifest);
     return;
   }
   if (sigBlock.algorithm !== "Ed25519") {
@@ -346,15 +419,37 @@ async function run(text) {
     res.innerHTML = card("ok", "Verificada",
       "<p>La firma es válida contra la clave pública que aportaste. <strong>La procedencia " +
       "queda probada respecto de esa clave</strong>, y el contenido del manifiesto no cambió " +
-      "desde que se firmó.</p>") + summary(env.manifest);
+      "desde que se firmó.</p>") + paqueteCard(env.manifest) + summary(env.manifest);
   } else {
     res.innerHTML = card("warn", "No probada",
       "<p>La firma es coherente con la clave que viaja <strong>dentro del propio archivo</strong>. " +
       "Eso demuestra que el manifiesto no fue alterado, pero <strong>no demuestra quién lo " +
       "emitió</strong>: cualquiera pudo firmarlo con su propia clave y adjuntarla.</p>" +
       "<p>Para probar la procedencia, pegá arriba la clave pública del proveedor obtenida por " +
-      "un canal <em>independiente</em> de este archivo.</p>") + summary(env.manifest);
+      "un canal <em>independiente</em> de este archivo.</p>") +
+      paqueteCard(env.manifest) + summary(env.manifest);
   }
+}
+
+function paqueteCard(m) {
+  if (!PAQUETE) {
+    return card("warn", "El paquete no se comprobó",
+      "<p>Verificaste el <em>papel</em>, no la <em>carga</em>. La firma prueba que este " +
+      "manifiesto no fue alterado, pero no que el archivo que te mandaron sea el que " +
+      "describe: un manifiesto en verde puede viajar junto a cualquier otro paquete.</p>" +
+      "<p>Arrastrá también el <code>.tar.gz</code> arriba para cerrar esa brecha.</p>");
+  }
+  if (PAQUETE.sha256 === m.output.sha256) {
+    return card("ok", "El paquete corresponde",
+      "<p>El sha256 de <code>" + esc(PAQUETE.nombre) + "</code> coincide con el declarado " +
+      "en el precinto. El manifiesto describe <strong>ese</strong> archivo.</p>");
+  }
+  return card("bad", "El paquete NO corresponde",
+    "<p>El sha256 de <code>" + esc(PAQUETE.nombre) + "</code> no coincide con el declarado. " +
+    "O te mandaron otro archivo, o fue modificado después de precintarlo.</p>" +
+    "<p style='font-family:ui-monospace,Menlo,monospace;font-size:12.5px'>declarado " +
+    esc(m.output.sha256.slice(0, 32)) + "…<br>recibido&nbsp; " + esc(PAQUETE.sha256.slice(0, 32)) +
+    "…</p>");
 }
 
 function summary(m) {
