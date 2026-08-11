@@ -350,8 +350,14 @@ async function leerPaquete(f) {
     sha256: Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, "0")).join(""),
     bytes: f.size,
   };
-  drop2.innerHTML = "<p><strong>" + esc(f.name) + "</strong></p><p style='margin-top:6px'>sha256 " +
-                    PAQUETE.sha256.slice(0, 24) + "…</p>";
+  // Reemplazar el innerHTML entero destruiría el <input>, y con él su listener:
+  // después de cargar un paquete no se podía cargar otro sin recargar la página.
+  // Se actualiza sólo el texto y el input queda donde está.
+  drop2.querySelectorAll("p").forEach((el, i) => {
+    el.innerHTML = i === 0
+      ? "<strong>" + esc(f.name) + "</strong>"
+      : "sha256 " + PAQUETE.sha256.slice(0, 24) + "… — arrastrá otro para reemplazarlo";
+  });
   if (LAST) run(LAST);
 }
 
@@ -410,7 +416,10 @@ async function run(text) {
     res.innerHTML = card("bad", "Firma inválida",
       "<p>" + (external
         ? "El manifiesto no fue firmado por la clave que aportaste, o fue alterado después de firmarse."
-        : "El manifiesto fue alterado después de firmarse.") + "</p>" +
+        : "La firma no valida ni siquiera contra la clave que viene dentro del archivo. " +
+          "O el manifiesto fue alterado después de firmarse, o la firma está fabricada " +
+          "(una clave de orden bajo, un punto no canónico, un S fuera de rango). " +
+          "En cualquiera de los casos: no vale.") + "</p>" +
       (pemError ? "<p>" + esc(pemError) + "</p>" : "")) + summary(env.manifest);
     return;
   }
