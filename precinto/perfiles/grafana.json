@@ -13,5 +13,12 @@
   ],
   "extra_terms": [],
   "entropy_min_bits": 4.2,
-  "block_uninspectable": true
+  "block_uninspectable": true,
+  "severity_policy": {
+    "critical": "pseudonymized",
+    "high": "pseudonymized",
+    "medium": "pseudonymized",
+    "low": "flagged_for_review"
+  },
+  "allow_extra_text_ext": []
 }

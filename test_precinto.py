@@ -19,7 +19,11 @@ import tempfile
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import precinto as bg  # noqa: E402
+# `precinto.cli` funciona igual desde el checkout y desde el paquete instalado.
+# Un `import precinto` a secas resolvía al módulo suelto antes y al paquete después:
+# la suite pasaba en el repositorio y explotaba contra la rueda, que es justo el
+# escenario que hay que poder probar.
+from precinto import cli as bg  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -402,6 +406,176 @@ def test_no_network():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_segunda_tanda():
+    """Los cuatro hallazgos cerrados después de la primera auditoría."""
+    print("\nSEGUNDA TANDA DE ARREGLOS")
+    d = tmpdir()
+    try:
+        # #2 hash de árbol reproducible y sensible
+        b = os.path.join(d, "b"); os.makedirs(b)
+        with open(os.path.join(b, "a.log"), "w") as fh: fh.write("hola\n")
+        h1, n1 = bg.sha256_tree(b)
+        check("hash de árbol reproducible", bg.sha256_tree(b)[0] == h1 and n1 > 0)
+        with open(os.path.join(b, "c.log"), "w") as fh: fh.write("nuevo\n")
+        h2, _ = bg.sha256_tree(b)
+        check("cambia al agregar un archivo", h1 != h2)
+        os.rename(os.path.join(b, "c.log"), os.path.join(b, "d.log"))
+        check("cambia al renombrar", bg.sha256_tree(b)[0] != h2)
+
+        priv, _pub = bg.keygen(os.path.join(d, "k"))
+        class A(object):
+            bundle = b; profile = None; out = os.path.join(d, "o")
+            output_name = None; sign = priv
+        import io, contextlib
+        with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(A())
+        man = json.load(open(os.path.join(d, "o", "manifest.json")))["manifest"]
+        check("un directorio ya no se firma con sha256 vacío",
+              man["input"]["sha256"] != "" and man["input"]["bytes"] > 0)
+
+        # #3 contraseñas con espacios y token genérico
+        prof = bg.load_profile(None); ps = bg.Pseudonymizer()
+        c, _f = bg.scan_text('password: "correct horse battery staple"\n', "x.yaml", prof, ps, None)
+        check("contraseña entrecomillada CON espacios enmascarada entera",
+              "correct horse battery staple" not in c and "battery" not in c)
+        c, _f = bg.scan_text("token=abc123def456ghi\n", "x.log", prof, ps, None)
+        check("token= genérico detectado", "abc123def456ghi" not in c)
+        c, f = bg.scan_text("token_count=5\nretry_tokens=3\n", "x.log", prof, ps, None)
+        check("token_count=5 NO es un falso positivo", not f)
+
+        # #3 solapamiento: el perdedor se recorta, no se descarta
+        prof2 = bg.load_profile(None)
+        ancho = "Proyecto Vulcano ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + " fase dos"
+        prof2["extra_terms"] = [ancho]
+        rx = bg.build_terms_rx(prof2["extra_terms"])
+        c, _f = bg.scan_text("ref: " + ancho + "\n", "y.log", prof2, bg.Pseudonymizer(), rx)
+        check("solapamiento: nada del término ancho queda en claro",
+              "Proyecto Vulcano" not in c and "fase dos" not in c and "ghp_A1b2" not in c)
+
+        # #4 'none' tiene veredicto propio
+        env = {"manifest": _minimal_manifest(),
+               "signature": {"algorithm": "none", "public_key_raw_b64": "", "value_b64": ""}}
+        code, lines = bg.verify_envelope(env, None)
+        check("algorithm='none' -> código 4 (sin firmar), no 2", code == 4)
+        check("...y lo dice explícitamente", any("SIN FIRMAR" in l for l in lines))
+        env["signature"] = {"algorithm": "Ed25519", "public_key_raw_b64": "AA==",
+                            "value_b64": "no es base64!!"}
+        check("base64 inválido rechazado", bg.verify_envelope(env, None)[0] == 2)
+
+        # #5 hash del perfil salado
+        pp = os.path.join(d, "p.json")
+        prof3 = json.loads(json.dumps(bg.DEFAULT_PROFILE)); prof3["extra_terms"] = ["Cliente Uno"]
+        with open(pp, "w") as fh: json.dump(prof3, fh)
+        hs = []
+        for i in range(2):
+            class B(object):
+                bundle = b; profile = pp; out = os.path.join(d, "o%d" % i)
+                output_name = None; sign = priv
+            with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(B())
+            hs.append(json.load(open(os.path.join(d, "o%d" % i, "manifest.json")))
+                      ["manifest"]["profile"]["fingerprint"])
+        crudo = __import__("hashlib").sha256(bg._canonical(bg.load_profile(pp))).hexdigest()
+        check("el hash del perfil está salado (no es un oráculo de diccionario)",
+              hs[0] != hs[1] and crudo[:16] not in hs)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_tercera_tanda():
+    """Bloqueantes y defectos de la SEGUNDA auditoría."""
+    print("\nTERCERA TANDA — bloqueantes de la segunda auditoría")
+    d = tmpdir()
+    try:
+        import io, contextlib, hashlib, tarfile
+        # El paquete se GENERA acá: depender de `demo/…` del checkout hacía que la
+        # suite fallara al correr contra el paquete instalado, que es precisamente
+        # la única forma de probar que la rueda no está rota.
+        orig = os.path.join(d, "b.tar.gz")
+        semilla = os.path.join(d, "semilla"); os.makedirs(semilla)
+        with open(os.path.join(semilla, "app.log"), "w") as fh:
+            fh.write("token=ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + "\n")
+        with tarfile.open(orig, "w:gz") as tf:
+            tf.add(os.path.join(semilla, "app.log"), arcname="app.log")
+        antes = hashlib.sha256(open(orig, "rb").read()).hexdigest()
+        priv, _pub = bg.keygen(os.path.join(d, "k"))
+
+        for nombre, on in [("ruta absoluta al original", orig), ("../ para escapar", "../x.tar.gz"),
+                           ("subruta", "sub/x.tar.gz"), ("nombre oculto", ".x.tar.gz")]:
+            class A(object):
+                bundle = orig; profile = None; out = os.path.join(d, "s"); output_name = on; sign = None
+            rechazado = False
+            try:
+                with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(A())
+            except SystemExit:
+                rechazado = True
+            except Exception:
+                rechazado = True
+            check("--output-name con %s -> rechazado" % nombre, rechazado)
+        check("el paquete original quedó intacto",
+              hashlib.sha256(open(orig, "rb").read()).hexdigest() == antes)
+
+        # el hash del manifiesto describe los bytes procesados
+        class B(object):
+            bundle = orig; profile = None; out = os.path.join(d, "o")
+            output_name = None; sign = priv
+        with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(B())
+        man = json.load(open(os.path.join(d, "o", "manifest.json")))["manifest"]
+        check("el sha declarado coincide con el archivo procesado",
+              man["input"]["sha256"] == antes)
+
+        # instantánea inmune a symlinks
+        src = os.path.join(d, "bundle"); os.makedirs(os.path.join(src, "sub"))
+        with open(os.path.join(d, "EXTERNO.txt"), "w") as fh: fh.write("dato de fuera")
+        with open(os.path.join(src, "propio.log"), "w") as fh: fh.write("propio\n")
+        with open(os.path.join(src, "sub", "hondo.log"), "w") as fh: fh.write("hondo\n")
+        os.symlink(os.path.join(d, "EXTERNO.txt"), os.path.join(src, "link.txt"))
+        os.symlink(d, os.path.join(src, "dirlink"))
+        snap = os.path.join(d, "snap"); bg.snapshot_tree(src, snap)
+        hay = []
+        for dp, _dn, fn in os.walk(snap):
+            for f in fn: hay.append(os.path.relpath(os.path.join(dp, f), snap))
+        check("la instantánea NO copia el enlace a un archivo externo", "link.txt" not in hay)
+        check("la instantánea NO sigue un enlace a directorio",
+              not any("EXTERNO" in h for h in hay))
+        check("la instantánea sí copia lo propio y lo anidado",
+              "propio.log" in hay and os.path.join("sub", "hondo.log") in hay)
+
+        # nombres saneados TAMBIÉN en la copia
+        b2 = os.path.join(d, "b2"); os.makedirs(b2)
+        tok = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+        with open(os.path.join(b2, "%s.log" % tok), "w") as fh: fh.write("limpio\n")
+        with open(os.path.join(b2, "ana.perez@cliente.de.log"), "w") as fh: fh.write("otro\n")
+        with open(os.path.join(b2, "normal.log"), "w") as fh: fh.write("traza\n")
+        class C(object):
+            bundle = b2; profile = None; out = os.path.join(d, "o2"); output_name = None; sign = priv
+        with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(C())
+        tp = [f for f in os.listdir(os.path.join(d, "o2")) if f.endswith(".tar.gz")][0]
+        with tarfile.open(os.path.join(d, "o2", tp)) as tf:
+            nombres = tf.getnames()
+            metas = [(m.uid, m.gid, m.uname, m.gname, m.mtime) for m in tf.getmembers()]
+        check("un token en el NOMBRE no sale dentro del tar", not any(tok in n for n in nombres))
+        check("un email en el NOMBRE no sale dentro del tar",
+              not any("ana.perez" in n for n in nombres))
+        check("sin anidamiento de tokens en los nombres", not any(":<" in n for n in nombres))
+        check("la extensión se preserva", all(n.endswith(".log") for n in nombres))
+        check("un nombre inocuo queda intacto", any(n.endswith("normal.log") for n in nombres))
+        check("el tar no lleva uid/gid/uname/mtime de la máquina",
+              all(m == (0, 0, "", "", 0) for m in metas))
+
+        # falsos positivos destructivos
+        prof = bg.load_profile(None); ps = bg.Pseudonymizer()
+        for txt, debe in [("password: correct horse battery staple\n", True),
+                          ("db.password=simple123\n", True),
+                          ("token_count=100000\n", False),
+                          ("credential_provider=default\n", False),
+                          ("bearer_strategy=enabled\n", False),
+                          ("password_policy=strict\n", False)]:
+            _c, f = bg.scan_text(txt, "x.yaml", prof, ps, None)
+            det = any(x.cls == "password_assignment" for x in f)
+            check("%-42s -> %s" % (txt.strip()[:42], "enmascara" if debe else "respeta"), det == debe)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def _minimal_manifest():
     from collections import OrderedDict
     return OrderedDict([
@@ -412,7 +586,7 @@ def _minimal_manifest():
                                ("bytes", 10), ("mode", "tar")])),
         ("output", OrderedDict([("name", "b.san.tgz"), ("sha256", "b" * 64), ("bytes", 8)])),
         ("profile", OrderedDict([("name", "generic"), ("version", "0.1.0"),
-                                 ("sha256", "c" * 64)])),
+                                 ("fingerprint", "c" * 16)])),
         ("rules_version", "2026.08.1"),
         ("inventory", OrderedDict([("files_total", 2), ("inspected", 1),
                                    ("blocked", 1), ("empty", 0)])),
@@ -439,6 +613,8 @@ if __name__ == "__main__":
     test_fail_closed()
     test_leaf_types()
     test_no_network()
+    test_segunda_tanda()
+    test_tercera_tanda()
     print("\n" + "─" * 62)
     print("  %d en verde · %d en rojo" % (len(PASS), len(FAIL)))
     if FAIL:
