@@ -576,6 +576,39 @@ def test_tercera_tanda():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_resolucion_de_perfiles():
+    print("\nRESOLUCIÓN DE PERFILES")
+    d = tmpdir()
+    cwd = os.getcwd()
+    try:
+        os.chdir(d)
+        os.makedirs("demo")          # un directorio que se llama igual que un perfil
+        p = bg.load_profile("demo")
+        check("--profile <nombre> resuelve el perfil incluido aunque exista un "
+              "directorio con ese nombre", p["name"] == "demo-fabricante")
+        nombres = bg.perfiles_incluidos()
+        check("los perfiles incluidos se listan (%d)" % len(nombres), len(nombres) >= 13)
+        check("atlassian-dc está entre ellos", "atlassian-dc" in nombres)
+        ruta = os.path.join(d, "propio.json")
+        with open(ruta, "w") as fh:
+            json.dump({"name": "propio", "version": "1", "description": "x",
+                       "deny_files": [], "allow_extra_text_ext": [], "extra_terms": [],
+                       "severity_policy": {"critical": "pseudonymized", "high": "pseudonymized",
+                                           "medium": "pseudonymized", "low": "flagged_for_review"},
+                       "entropy_min_bits": 4.2, "block_uninspectable": True}, fh)
+        check("--profile <ruta propia> sigue funcionando",
+              bg.load_profile(ruta)["name"] == "propio")
+        malo = False
+        try:
+            bg.load_profile("no-existe-este-perfil")
+        except ValueError:
+            malo = True
+        check("un nombre inexistente da un error que lista los disponibles", malo)
+    finally:
+        os.chdir(cwd)
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def _minimal_manifest():
     from collections import OrderedDict
     return OrderedDict([
@@ -615,6 +648,7 @@ if __name__ == "__main__":
     test_no_network()
     test_segunda_tanda()
     test_tercera_tanda()
+    test_resolucion_de_perfiles()
     print("\n" + "─" * 62)
     print("  %d en verde · %d en rojo" % (len(PASS), len(FAIL)))
     if FAIL:

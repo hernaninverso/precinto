@@ -126,6 +126,6 @@ o un asunto en el repositorio. No mandes paquetes de diagnóstico: no los quiero
 ## Tests
 
 ```bash
-python3 test_precinto.py       # 82 comprobaciones
+python3 test_precinto.py       # 87 comprobaciones
 node test_verificador_web.js   # 26 sobre el verificador del navegador
 ```

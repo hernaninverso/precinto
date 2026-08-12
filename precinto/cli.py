@@ -286,7 +286,9 @@ def _leer_perfil(ref):
     funciona en el checkout y falla dentro de una rueda. Es exactamente el fallo
     por el que `eleion-compliance-kit` quedó con todos sus cargadores rotos.
     """
-    if os.path.exists(ref):
+    # isfile, no exists: con `--profile demo` y un directorio `demo/` al lado,
+    # `exists` daba True y se intentaba abrir el directorio como archivo.
+    if os.path.isfile(ref):
         with open(ref, "r", encoding="utf-8") as fh:
             return json.load(fh)
     nombre = ref[:-5] if ref.endswith(".json") else ref
