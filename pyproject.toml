@@ -18,7 +18,11 @@ classifiers = [
   "Topic :: Security",
   "Topic :: System :: Systems Administration",
   "Programming Language :: Python :: 3",
-  "Operating System :: OS Independent",
+  # NO se declara OS Independent: snapshot_tree usa O_NOFOLLOW, O_DIRECTORY y
+  # dir_fd, que son extensiones POSIX. El modo directorio no funciona igual en
+  # Windows, y decir lo contrario en los metadatos sería una promesa falsa.
+  "Operating System :: POSIX",
+  "Operating System :: MacOS",
 ]
 
 # Una sola dependencia, y sólo para firmar y verificar: el escaneo funciona sin ella.

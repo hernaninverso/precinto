@@ -502,14 +502,14 @@ def test_tercera_tanda():
                            ("subruta", "sub/x.tar.gz"), ("nombre oculto", ".x.tar.gz")]:
             class A(object):
                 bundle = orig; profile = None; out = os.path.join(d, "s"); output_name = on; sign = None
+            # SÓLO SystemExit vale: antes se aceptaba cualquier Exception, así que
+            # un crash por otro motivo contaba como "rechazado correctamente".
             rechazado = False
             try:
                 with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(A())
             except SystemExit:
                 rechazado = True
-            except Exception:
-                rechazado = True
-            check("--output-name con %s -> rechazado" % nombre, rechazado)
+            check("--output-name con %s -> rechazado con SystemExit" % nombre, rechazado)
         check("el paquete original quedó intacto",
               hashlib.sha256(open(orig, "rb").read()).hexdigest() == antes)
 
@@ -572,6 +572,139 @@ def test_tercera_tanda():
             _c, f = bg.scan_text(txt, "x.yaml", prof, ps, None)
             det = any(x.cls == "password_assignment" for x in f)
             check("%-42s -> %s" % (txt.strip()[:42], "enmascara" if debe else "respeta"), det == debe)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_manifiesto_no_destruye():
+    """P0 de la tercera auditoría: el manifiesto abría una segunda vía de truncamiento."""
+    print("\nEL MANIFIESTO NO DESTRUYE NADA")
+    import io, contextlib, tarfile, hashlib
+    d = tmpdir()
+    try:
+        # 1) entrada llamada manifest.json con --out en su propio directorio
+        orig = os.path.join(d, "manifest.json")
+        st = os.path.join(d, "st"); os.makedirs(st)
+        with open(os.path.join(st, "a.log"), "w") as fh: fh.write("contenido\n")
+        with tarfile.open(orig, "w:gz") as tf:
+            tf.add(os.path.join(st, "a.log"), arcname="a.log")
+        h = hashlib.sha256(open(orig, "rb").read()).hexdigest()
+        class A(object):
+            bundle = orig; profile = None; out = d; output_name = None; sign = None
+        try:
+            with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(A())
+        except SystemExit:
+            pass
+        check("una entrada llamada manifest.json no es destruida por su propio manifiesto",
+              os.path.exists(orig) and hashlib.sha256(open(orig, "rb").read()).hexdigest() == h)
+
+        # 2) --output-name manifest.json
+        b = os.path.join(d, "b.tar.gz")
+        with tarfile.open(b, "w:gz") as tf:
+            tf.add(os.path.join(st, "a.log"), arcname="a.log")
+        rechazado = False
+        class B(object):
+            bundle = b; profile = None; out = os.path.join(d, "o")
+            output_name = "manifest.json"; sign = None
+        try:
+            with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(B())
+        except SystemExit:
+            rechazado = True
+        check("--output-name manifest.json rechazado (el nombre está reservado)", rechazado)
+
+        # 3) manifest.json preexistente como enlace simbólico
+        victima = os.path.join(d, "VICTIMA.txt")
+        with open(victima, "w") as fh: fh.write("no me toques\n")
+        outd = os.path.join(d, "o3"); os.makedirs(outd)
+        os.symlink(victima, os.path.join(outd, "manifest.json"))
+        rechazado = False
+        class C(object):
+            bundle = b; profile = None; output_name = None; sign = None
+        C.out = outd
+        try:
+            with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(C())
+        except SystemExit:
+            rechazado = True
+        check("manifest.json que es un enlace simbólico -> rechazado", rechazado)
+        check("el destino del enlace quedó intacto",
+              open(victima).read().strip() == "no me toques")
+
+        # 4) el caso legítimo sigue funcionando y sin dejar temporales
+        outd2 = os.path.join(d, "o4")
+        class D(object):
+            bundle = b; profile = None; output_name = None; sign = None
+        D.out = outd2
+        with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(D())
+        man = json.load(open(os.path.join(outd2, "manifest.json")))
+        check("el caso legítimo emite el manifiesto", man["manifest"]["status"] in
+              ("PASS", "REVIEW", "BLOCKED"))
+        check("no quedan temporales .part huérfanos",
+              not any(f.endswith(".part") for f in os.listdir(outd2)))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_traversal_y_colisiones():
+    """P1 de la tercera auditoría."""
+    print("\nTRAVERSAL DE PERFILES Y COLISIONES DE NOMBRE")
+    for n in ["../otro", "sub/perfil", "/etc/passwd", "..", ".oculto"]:
+        rechazado = False
+        try:
+            bg.load_profile(n)
+        except ValueError:
+            rechazado = True
+        check("--profile %-14s -> rechazado" % repr(n), rechazado)
+    check("un nombre incluido legítimo sigue resolviendo",
+          bg.load_profile("atlassian-dc")["name"] == "atlassian-dc")
+
+    ps = bg.Pseudonymizer(); memo = {}
+    tok = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    a = bg._safe_relname("%s.log" % tok, ps, None, memo)
+    b = bg._safe_relname("otro/%s.log" % tok, ps, None, memo)
+    c = bg._safe_relname(a, ps, None, memo)      # una ruta que YA es destino de otra
+    check("orígenes distintos -> destinos distintos", len({a, b, c}) == 3)
+    check("el mismo origen es idempotente",
+          bg._safe_relname("%s.log" % tok, ps, None, memo) == a)
+
+    d = tmpdir()
+    try:
+        hondo = d
+        for i in range(bg.MAX_DEPTH + 5):
+            hondo = os.path.join(hondo, "n%d" % i)
+        os.makedirs(hondo)
+        with open(os.path.join(hondo, "f.log"), "w") as fh: fh.write("x\n")
+        profundo = False
+        try:
+            bg.snapshot_tree(os.path.join(d, "n0"), os.path.join(d, "snap"))
+        except bg.UnsafeArchive:
+            profundo = True
+        check("un árbol más profundo que el límite -> UnsafeArchive, no RecursionError",
+              profundo)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_bench_distingue_marcado():
+    """El banco daba FLAGGED por inalcanzable y publicaba un número incorrecto."""
+    print("\nEL BANCO DISTINGUE MARCADO DE NEUTRALIZADO")
+    import io, contextlib
+    d = tmpdir()
+    try:
+        bg_demo = __import__("precinto.demo", fromlist=["generar"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            bg_demo.generar(d)
+        class A(object):
+            bundle = os.path.join(d, "support-bundle-demo.tar.gz")
+            canaries = os.path.join(d, "canaries.json")
+            profile = "demo"
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = bg.cmd_bench(A())
+        salida = buf.getvalue()
+        check("el banco corre sin escapados", code == 0)
+        fila = [l for l in salida.splitlines() if "TOTAL" in l]
+        check("hay al menos un canario MARCADO (antes era inalcanzable)",
+              bool(fila) and fila[0].split()[-2] != "0")
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -649,6 +782,9 @@ if __name__ == "__main__":
     test_segunda_tanda()
     test_tercera_tanda()
     test_resolucion_de_perfiles()
+    test_manifiesto_no_destruye()
+    test_traversal_y_colisiones()
+    test_bench_distingue_marcado()
     print("\n" + "─" * 62)
     print("  %d en verde · %d en rojo" % (len(PASS), len(FAIL)))
     if FAIL:

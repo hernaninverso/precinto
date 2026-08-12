@@ -321,6 +321,10 @@ fileEl.addEventListener("change", () => { if (fileEl.files[0]) read(fileEl.files
 pkEl.addEventListener("input", () => { if (LAST) run(LAST); });
 
 let LAST = null, PAQUETE = null;
+/* Contador de generación. Sin él, si empieza a verificarse A, el usuario carga B,
+   B termina primero y A termina después, A sobrescribía la pantalla con un
+   veredicto que ya no corresponde al archivo cargado. */
+let GEN = 0;
 function read(f) {
   const r = new FileReader();
   r.onload = () => { LAST = r.result; run(LAST); };
@@ -343,8 +347,10 @@ drop2.addEventListener("drop", e => {
 file2.addEventListener("change", () => { if (file2.files[0]) leerPaquete(file2.files[0]); });
 
 async function leerPaquete(f) {
+  const gen = ++GEN;
   const buf = await f.arrayBuffer();
   const h = await crypto.subtle.digest("SHA-256", buf);
+  if (gen !== GEN) return;          // otro paquete se cargó mientras se hasheaba
   PAQUETE = {
     nombre: f.name,
     sha256: Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, "0")).join(""),
@@ -367,6 +373,7 @@ function card(kind, title, body) {
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 
 async function run(text) {
+  const gen = ++GEN;
   // Limpiar SIEMPRE antes de validar. Un fallo de base64 o de canonización ocurre
   // fuera del try de la verificación: si el resultado anterior sigue pintado, una
   // carga malformada deja en pantalla un "Verificada" que ya no corresponde.
@@ -425,6 +432,7 @@ async function run(text) {
   let okSig = false;
   const t0 = performance.now();
   try { okSig = await ed25519Verify(sig, msg, pub); } catch (e) { okSig = false; }
+  if (gen !== GEN) return;          // llegó tarde: ya hay otro archivo cargado
   const ms = Math.round(performance.now() - t0);
   $("#eng").textContent = "Ed25519 en BigInt · SHA-512 por WebCrypto · verificación en " + ms + " ms · sin red";
 

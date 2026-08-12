@@ -160,10 +160,11 @@ def generar(out):
     os.makedirs(outdir, exist_ok=True)
 
     files = build_files()
-    stage = os.path.join(outdir, "_stage")
-    if os.path.isdir(stage):
-        import shutil
-        shutil.rmtree(stage)
+    # Staging en un temporal exclusivo: antes borraba recursivamente un `_stage`
+    # preexistente dentro de --out, así que `precinto demo --out .` destruía un
+    # directorio del usuario sin preguntar.
+    import shutil, tempfile
+    stage = tempfile.mkdtemp(prefix=".precinto-demo-", dir=outdir)
     for rel, content in files.items():
         p = os.path.join(stage, rel)
         os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -179,20 +180,27 @@ def generar(out):
                 break
 
     bundle = os.path.join(outdir, "support-bundle-demo.tar.gz")
-    with tarfile.open(bundle, "w:gz") as tf:
+    for destino in (bundle, os.path.join(outdir, "canaries.json")):
+        if os.path.islink(destino):
+            raise SystemExit("precinto demo: %s es un enlace simbólico; escribirlo "
+                             "seguiría el enlace y truncaría su destino." % destino)
+    tmp_bundle = bundle + ".part"
+    with tarfile.open(tmp_bundle, "w:gz") as tf:
         for dirpath, _d, fns in os.walk(stage):
             for fn in sorted(fns):
                 full = os.path.join(dirpath, fn)
                 tf.add(full, arcname=os.path.relpath(full, stage))
+    os.replace(tmp_bundle, bundle)
 
     ledger_path = os.path.join(outdir, "canaries.json")
-    with open(ledger_path, "w", encoding="utf-8") as fh:
+    tmp_ledger = ledger_path + ".part"
+    with open(tmp_ledger, "w", encoding="utf-8") as fh:
         json.dump({"generated_by": "make_canary_bundle.py",
                    "note": "Valores sintéticos. Ninguno es una credencial real.",
                    "canaries": CANARIES}, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
+    os.replace(tmp_ledger, ledger_path)
 
-    import shutil
     shutil.rmtree(stage, ignore_errors=True)
     print("Paquete de demostración  %s" % bundle)
     print("Registro de canarios     %s  (%d canarios en %d clases)"

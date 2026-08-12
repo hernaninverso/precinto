@@ -48,6 +48,7 @@ TOOL_NAME = "precinto"
 TOOL_VERSION = "0.1.0"   # reserva; la real sale de los metadatos, ver _version()
 RULES_VERSION = "2026.08.1"
 MANIFEST_FORMAT = "1.0"
+MANIFEST_NAME = "manifest.json"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Límites de desempaquetado defensivo
@@ -56,6 +57,8 @@ MAX_ARCHIVE_BYTES = 2 * 1024 ** 3       # 2 GB comprimido
 MAX_EXPANDED_BYTES = 10 * 1024 ** 3     # 10 GB expandido
 MAX_MEMBER_BYTES = 512 * 1024 ** 2      # 512 MB por archivo
 MAX_MEMBERS = 200_000
+MAX_DEPTH = 64                          # profundidad máxima de un árbol de entrada
+MAX_DIRS = 50_000                       # los directorios también cuentan
 MAX_COMPRESSION_RATIO = 200             # anti bomba de descompresión
 MAX_LINE_BYTES = 64 * 1024              # una línea más larga se trunca al analizar
 
@@ -292,6 +295,13 @@ def _leer_perfil(ref):
         with open(ref, "r", encoding="utf-8") as fh:
             return json.load(fh)
     nombre = ref[:-5] if ref.endswith(".json") else ref
+    # `joinpath` NO confina: conserva `..` y un componente absoluto reemplaza la
+    # ruta anterior. Sin esto, `--profile ../otro` leía fuera de perfiles/.
+    if not re.match(r"^[A-Za-z0-9._-]+$", nombre) or nombre in (".", "..") \
+            or nombre.startswith("."):
+        raise ValueError("Nombre de perfil inválido: %r. Un nombre incluido sólo puede "
+                         "tener letras, dígitos, punto, guion y guion bajo. Para usar un "
+                         "perfil propio, pasá la ruta a un archivo que exista." % ref)
     try:
         from importlib.resources import files
         recurso = files("precinto").joinpath("perfiles", nombre + ".json")
@@ -452,8 +462,16 @@ def snapshot_tree(src, dest):
     count = 0
     src = os.path.abspath(src)
 
-    def recorrer(dir_fd, rel):
-        nonlocal total, count
+    dirs = 0
+
+    def recorrer(dir_fd, rel, prof):
+        # Iterativo en la parte que puede crecer sin control: un árbol construido a
+        # propósito con miles de niveles alcanzaba RecursionError antes que
+        # cualquier límite de bytes o de archivos, y los directorios ni siquiera
+        # contaban para el tope de miembros.
+        nonlocal total, count, dirs
+        if prof > MAX_DEPTH:
+            raise UnsafeArchive("el árbol supera la profundidad admitida (%d)" % MAX_DEPTH)
         with os.scandir(dir_fd) as it:
             entradas = sorted(it, key=lambda e: e.name)
         for ent in entradas:
@@ -467,8 +485,11 @@ def snapshot_tree(src, dest):
                 sub_fd = None
             if sub_fd is not None:
                 try:
+                    dirs += 1
+                    if dirs > MAX_DIRS:
+                        raise UnsafeArchive("demasiados directorios (>%d)" % MAX_DIRS)
                     os.makedirs(os.path.join(dest, rel, nombre), exist_ok=True)
-                    recorrer(sub_fd, os.path.join(rel, nombre))
+                    recorrer(sub_fd, os.path.join(rel, nombre), prof + 1)
                 finally:
                     os.close(sub_fd)
                 continue
@@ -495,7 +516,7 @@ def snapshot_tree(src, dest):
     raiz_fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
     try:
         os.makedirs(dest, exist_ok=True)
-        recorrer(raiz_fd, "")
+        recorrer(raiz_fd, "", 0)
     finally:
         os.close(raiz_fd)
     return total
@@ -1113,8 +1134,11 @@ def cmd_scan(args):
     # contiene `extra_terms` — nombres de clientes, proyectos y plantas, todos de
     # baja entropía — así que cualquiera con una lista de candidatos podía
     # confirmar cuáles están dentro probando hashes contra el manifiesto público.
-    # Con la sal efímera el hash sigue sirviendo para lo único que tiene que
-    # servir: comparar dos ejecuciones del MISMO paquete, no identificar el perfil.
+    # ATENCIÓN a lo que este campo NO es: con sal efímera cambia en cada ejecución,
+    # así que NO permite comparar dos ejecuciones ni que un tercero lo recompute.
+    # Sirve para vincular los hallazgos de ESTE manifiesto a un perfil concreto sin
+    # revelar sus términos. Si hiciera falta un compromiso verificable habría que
+    # definirlo sobre una representación publicable del perfil.
     profile_sha = pseudo.fingerprint("profile", _canonical(profile).decode("utf-8"))
     terms_rx = build_terms_rx(profile.get("extra_terms"))
 
@@ -1139,6 +1163,41 @@ def cmd_scan(args):
         if os.path.isabs(n) or re.search(r"[\\/]", n) or n in (".", "..") or n.startswith("."):
             die("--output-name debe ser un nombre de archivo simple, sin rutas ni "
                 "separadores ni empezar con punto. Recibido: %r" % n)
+        # manifest.json está RESERVADO: sin esto, el tar saneado se escribía y
+        # después el manifiesto lo pisaba, y quedaba un JSON con el hash de un tar
+        # que ya no existía.
+        if n.lower() == MANIFEST_NAME:
+            die("--output-name no puede ser %r: ese nombre está reservado para el "
+                "manifiesto." % MANIFEST_NAME)
+
+    # El manifiesto se escribe en outdir con nombre fijo, así que su ruta también
+    # tiene que validarse. No hacerlo abría una SEGUNDA vía de truncamiento del
+    # original: una entrada llamada `manifest.json` con `--out` en su mismo
+    # directorio se procesaba bien y después se destruía. Reproducido: 210 bytes
+    # de entrada quedaban reemplazados por 1578 de JSON.
+    man_path = os.path.join(outdir, MANIFEST_NAME)
+    if os.path.lexists(man_path):
+        if os.path.islink(man_path):
+            die("%s ya existe y es un enlace simbólico: escribirlo seguiría el "
+                "enlace y truncaría su destino." % man_path)
+        try:
+            if os.path.samefile(man_path, src_real):
+                die("el manifiesto se escribiría sobre la propia entrada (%s)." % src_real)
+        except OSError:
+            pass
+        try:
+            if os.stat(man_path).st_nlink > 1:
+                die("%s tiene más de un enlace duro: escribirlo truncaría también "
+                    "el otro nombre del mismo archivo." % man_path)
+        except OSError:
+            pass
+    try:
+        if os.path.samefile(os.path.dirname(man_path) or ".", os.path.dirname(src_real) or ".") \
+                and os.path.basename(src_real).lower() == MANIFEST_NAME:
+            die("la entrada se llama %s y --out es su mismo directorio: el manifiesto "
+                "destruiría el original." % MANIFEST_NAME)
+    except OSError:
+        pass
     workdir = tempfile.mkdtemp(prefix="precinto-")
     sanitized_root = os.path.join(workdir, "sanitized")
     os.makedirs(sanitized_root, exist_ok=True)
@@ -1247,7 +1306,7 @@ def cmd_scan(args):
 
         manifest = OrderedDict([
             ("manifest_format", MANIFEST_FORMAT),
-            ("tool", OrderedDict([("name", TOOL_NAME), ("version", TOOL_VERSION)])),
+            ("tool", OrderedDict([("name", TOOL_NAME), ("version", _version())])),
             ("generated_utc", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
             ("input", OrderedDict([("name", _safe_name(os.path.basename(src), pseudo, terms_rx)),
                                    ("sha256", in_sha),
@@ -1281,10 +1340,18 @@ def cmd_scan(args):
                                  ("signature", OrderedDict([("algorithm", "none"),
                                                             ("public_key_raw_b64", ""),
                                                             ("value_b64", "")]))]))
-        man_path = os.path.join(outdir, "manifest.json")
-        with open(man_path, "w", encoding="utf-8") as fh:
-            json.dump(env, fh, indent=2, ensure_ascii=False)
-            fh.write("\n")
+        # Temporal exclusivo + renombrado, igual que el tar: si algo falla a mitad,
+        # nadie se queda con un manifiesto truncado.
+        mtmp_fd, mtmp = tempfile.mkstemp(prefix=".precinto-man-", suffix=".part", dir=outdir)
+        try:
+            with os.fdopen(mtmp_fd, "w", encoding="utf-8") as fh:
+                json.dump(env, fh, indent=2, ensure_ascii=False)
+                fh.write("\n")
+            os.replace(mtmp, man_path)
+        except BaseException:
+            if os.path.exists(mtmp):
+                os.unlink(mtmp)
+            raise
 
         _report(manifest, findings, out_path, man_path, args.sign)
         return {"PASS": 0, "REVIEW": 3, "BLOCKED": 4}[status]
@@ -1308,16 +1375,25 @@ def _safe_relname(rel, pseudo, terms_rx, memo):
     dentro del tar, y el estado podía ser PASS. El memo mantiene la resolución
     determinista y evita que dos nombres distintos colapsen en el mismo.
     """
-    if rel in memo:
-        return memo[rel]
-    partes = []
-    for comp in rel.replace(os.sep, "/").split("/"):
-        limpio = _safe_name(comp, pseudo, terms_rx)
-        partes.append(limpio)
-    nuevo = "/".join(partes)
-    if nuevo != rel and nuevo in memo.values():
-        nuevo = "%s~%d" % (nuevo, len(memo))
-    memo[rel] = nuevo
+    # memo = {"origen": {rel: destino}, "usados": {destino: rel}}. El índice
+    # inverso es O(1): antes se hacía `nuevo in memo.values()`, una búsqueda lineal
+    # por cada ruta — con el tope de 200.000 miembros son miles de millones de
+    # comparaciones. Y sólo se comprobaba colisión cuando el nombre cambiaba, así
+    # que una ruta sin transformar podía pisar la salida transformada de otra.
+    origen = memo.setdefault("origen", {})
+    usados = memo.setdefault("usados", {})
+    if rel in origen:
+        return origen[rel]
+    partes = [_safe_name(c, pseudo, terms_rx) for c in rel.replace(os.sep, "/").split("/")]
+    base = "/".join(partes)
+    nuevo = base
+    n = 1
+    while usados.get(nuevo, rel) != rel:      # ocupado por OTRO origen: reintentar
+        raiz, ext = os.path.splitext(base)
+        nuevo = "%s~%d%s" % (raiz, n, ext)
+        n += 1
+    origen[rel] = nuevo
+    usados[nuevo] = rel
     return nuevo
 
 
@@ -1436,12 +1512,17 @@ def cmd_bench(args):
     results = []
     for c in ledger["canaries"]:
         cfile = c["file"].replace(os.sep, "/")
+        # El orden importa. Antes se preguntaba primero por la ausencia del valor,
+        # y como AHORA lo marcado también se enmascara, esa condición ganaba
+        # siempre: FLAGGED era inalcanzable y el banco informaba como
+        # "neutralizado" un canario que en realidad quedó pendiente de revisión.
+        # El número publicado en el sitio estaba mal por esto.
         if cfile in blocked_rel:
             outcome = RETAINED
-        elif c["value"] not in outgoing:
-            outcome = NEUTRALIZED
         elif (cfile, c.get("line")) in flagged_at:
             outcome = FLAGGED
+        elif c["value"] not in outgoing:
+            outcome = NEUTRALIZED
         else:
             outcome = ESCAPED
         results.append((c, outcome))
@@ -1474,8 +1555,8 @@ def cmd_bench(args):
     print("  Líneas analizadas     %d" % total_lines)
     print("")
     print("  Lectura: NEUTRALIZADO = reemplazado por un pseudónimo · RETENIDO = su archivo")
-    print("  se bloqueó entero · MARCADO = sigue en la copia pero una persona tiene que")
-    print("  decidir, y el paquete no sale hasta que lo haga · ESCAPADO = salió sin que")
+    print("  se bloqueó entero · MARCADO = también se enmascaró, pero queda una decisión")
+    print("  humana pendiente sobre si restaurarlo · ESCAPADO = salió en claro sin que")
     print("  nadie lo señalara. Solo esto último es un fallo.")
     print("")
     if escaped:

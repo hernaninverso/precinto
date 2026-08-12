@@ -134,10 +134,11 @@ precinto scan support-bundle.tar.gz \
   <thead><tr><th>Sobre el banco sintético de canarios</th><th class="n"></th></tr></thead>
   <tbody>
     <tr><td>Canarios plantados, en 14 clases</td><td class="n">17</td></tr>
-    <tr><td>Neutralizados — reemplazados por pseudónimo</td><td class="n">16</td></tr>
+    <tr><td>Neutralizados — reemplazados por pseudónimo</td><td class="n">15</td></tr>
     <tr><td>Retenidos — su archivo se bloqueó entero</td><td class="n">1</td></tr>
+    <tr><td>Marcados — enmascarados, con decisión humana pendiente</td><td class="n">1</td></tr>
     <tr><td><strong>Escapados</strong> — presentes en la copia sin marcar</td><td class="n"><strong>0</strong></td></tr>
-    <tr><td>Comprobaciones de regresión (Python + verificador web)</td><td class="n">113</td></tr>
+    <tr><td>Comprobaciones de regresión (Python + verificador web)</td><td class="n">104</td></tr>
   </tbody>
 </table></div>
 <p>El banco está en el repositorio y se regenera con semilla fija: cualquiera reproduce estos números en su máquina en menos de un minuto. Y el desglose distingue estados en vez de decir «contenido / no contenido», porque un banco binario se felicita a sí mismo — la primera versión de éste informaba 100% sin haber medido nada.</p>
@@ -170,7 +171,7 @@ de hecho, preferiría que no lo hicieras.</p>
 
 <h2>Para fabricantes de software autoalojado</h2>
 <p>Si tu documentación le pide al cliente que revise el paquete antes de mandártelo, ya conocés el problema: ese pedido es lento, manual y propenso a error, y el que lo paga en horas es tu equipo de soporte cuando el paquete llega tarde o incompleto.</p>
-<p>Precinto se integra después de tu generador de paquetes, con un perfil calibrado para tu formato. El cliente final no incorpora un proveedor privilegiado más: recibe una actualización tuya. Hay perfiles de partida para nueve productos en <code>perfiles/</code>, sin calibrar contra paquetes reales — eso se hace con tus datos, en tu máquina.</p>
+<p>Precinto se integra después de tu generador de paquetes, con un perfil calibrado para tu formato. El cliente final no incorpora un proveedor privilegiado más: recibe una actualización tuya. Hay perfiles de partida para doce productos en <code>perfiles/</code>, sin calibrar contra paquetes reales — eso se hace con tus datos, en tu máquina.</p>
 
 <footer>
   <p><strong>Precinto</strong> — AGPL-3.0 · Sin cuenta, sin telemetría, sin servicio alojado · <a href="https://github.com/hernaninverso/precinto">github.com/hernaninverso/precinto</a></p>
