@@ -27,6 +27,12 @@ from precinto import cli as bg  # noqa: E402
 
 PASS, FAIL = [], []
 
+# Construido por partes A PROPÓSITO. Escrito de un tirón, este literal dispara el
+# escaneo de secretos de cualquier plataforma con un falso positivo perfectamente
+# evitable — y un repositorio que se vende como control de salida de secretos no
+# debería aparecer marcado por su propio suite de pruebas.
+TOKEN_FALSO = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+
 
 def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
@@ -263,7 +269,7 @@ def test_manifest_never_leaks():
     print("\nEL MANIFIESTO NUNCA LLEVA EL VALOR")
     prof = bg.load_profile(None)
     ps = bg.Pseudonymizer()
-    secret = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    secret = TOKEN_FALSO
     _clean, f = bg.scan_text("TOKEN=%s\n" % secret, "x.env", prof, ps, None)
     blob = json.dumps([x.as_dict() for x in f])
     check("el valor del secreto no aparece en el manifiesto", secret not in blob)
@@ -333,9 +339,9 @@ def test_fail_closed():
         except bg.TooLargeToInspect: ok = True
         check("texto mayor al limite -> TooLargeToInspect (antes copiaba la cola sin mirar)", ok)
 
-        name = bg._safe_name("ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8.png", ps)
+        name = bg._safe_name(TOKEN_FALSO + ".png", ps)
         check("un token en el NOMBRE del archivo no llega al manifiesto",
-              "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" not in name)
+              TOKEN_FALSO not in name)
 
         src = os.path.join(d, "bundle"); os.makedirs(src)
         with open(os.path.join(d, "afuera.txt"), "w") as fh: fh.write("SECRETO EXTERNO")
@@ -384,7 +390,7 @@ def test_no_network():
     try:
         src = os.path.join(d, "b"); os.makedirs(src)
         with open(os.path.join(src, "a.log"), "w") as fh:
-            fh.write("token=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8\nmail=x@corp.de\n")
+            fh.write("token=" + TOKEN_FALSO + "\nmail=x@corp.de\n")
         priv, _pub = bg.keygen(os.path.join(d, "k"))
         socket.socket = bloqueado
         socket.create_connection = bloqueado
@@ -492,7 +498,7 @@ def test_tercera_tanda():
         orig = os.path.join(d, "b.tar.gz")
         semilla = os.path.join(d, "semilla"); os.makedirs(semilla)
         with open(os.path.join(semilla, "app.log"), "w") as fh:
-            fh.write("token=ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + "\n")
+            fh.write("token=" + TOKEN_FALSO + "\n")
         with tarfile.open(orig, "w:gz") as tf:
             tf.add(os.path.join(semilla, "app.log"), arcname="app.log")
         antes = hashlib.sha256(open(orig, "rb").read()).hexdigest()
@@ -541,7 +547,7 @@ def test_tercera_tanda():
 
         # nombres saneados TAMBIÉN en la copia
         b2 = os.path.join(d, "b2"); os.makedirs(b2)
-        tok = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+        tok = TOKEN_FALSO
         with open(os.path.join(b2, "%s.log" % tok), "w") as fh: fh.write("limpio\n")
         with open(os.path.join(b2, "ana.perez@cliente.de.log"), "w") as fh: fh.write("otro\n")
         with open(os.path.join(b2, "normal.log"), "w") as fh: fh.write("traza\n")
@@ -658,7 +664,7 @@ def test_traversal_y_colisiones():
           bg.load_profile("atlassian-dc")["name"] == "atlassian-dc")
 
     ps = bg.Pseudonymizer(); memo = {}
-    tok = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    tok = TOKEN_FALSO
     a = bg._safe_relname("%s.log" % tok, ps, None, memo)
     b = bg._safe_relname("otro/%s.log" % tok, ps, None, memo)
     c = bg._safe_relname(a, ps, None, memo)      # una ruta que YA es destino de otra

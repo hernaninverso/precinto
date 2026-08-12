@@ -1,0 +1,169 @@
+name: verificación
+
+# La regla de esta canalización: no alcanza con que las comprobaciones den verde.
+# Tiene que fallar también cuando la suite NO LLEGA A EJECUTARSE, que es el modo de
+# fallo silencioso que este proyecto persigue en otros. Por eso cada paso exige un
+# número mínimo de comprobaciones, y no sólo un código de salida cero.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MIN_PY: 100        # comprobaciones mínimas de Python; si bajan, algo se perdió
+  MIN_JS: 24         # ídem del verificador del navegador
+
+jobs:
+  suite:
+    name: suite en el checkout
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install --upgrade pip cryptography
+      - name: generar el banco sintético
+        run: |
+          python3 precinto.py demo --out demo
+          python3 precinto.py keygen --out claves
+          python3 precinto.py scan demo/support-bundle-demo.tar.gz \
+                  --profile demo --out demo/salida --sign claves/private.pem || true
+      - name: suite de Python, exigiendo un mínimo de comprobaciones
+        run: |
+          set -o pipefail
+          python3 test_precinto.py | tee /tmp/py.txt
+          N=$(grep -oE '[0-9]+ en verde' /tmp/py.txt | grep -oE '^[0-9]+' | tail -1)
+          echo "comprobaciones ejecutadas: ${N:-0} (mínimo ${MIN_PY})"
+          test -n "$N" || { echo "::error::la suite no llegó a ejecutarse"; exit 1; }
+          test "$N" -ge "$MIN_PY" || { echo "::error::bajaron las comprobaciones: $N < $MIN_PY"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: suite del verificador del navegador
+        run: |
+          set -o pipefail
+          node test_verificador_web.js | tee /tmp/js.txt
+          N=$(grep -oE '[0-9]+ en verde' /tmp/js.txt | grep -oE '^[0-9]+' | tail -1)
+          echo "comprobaciones ejecutadas: ${N:-0} (mínimo ${MIN_JS})"
+          test -n "$N" || { echo "::error::la suite de JavaScript no llegó a ejecutarse"; exit 1; }
+          test "$N" -ge "$MIN_JS" || { echo "::error::bajaron las comprobaciones: $N < $MIN_JS"; exit 1; }
+
+  rueda:
+    name: rueda instalada, corriendo fuera del repositorio
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install --upgrade pip build
+      - name: construir
+        run: python -m build --wheel
+
+      # Los datos del paquete son el fallo clásico: la rueda sale sin ellos, los
+      # cargadores revientan, y los tests siguen en verde porque corren en editable
+      # desde el checkout. Se cuentan DENTRO del .whl.
+      - name: la rueda contiene los trece perfiles
+        run: |
+          python - <<'EOF'
+          import glob, zipfile, sys
+          w = glob.glob("dist/*.whl")[0]
+          js = [n for n in zipfile.ZipFile(w).namelist()
+                if n.endswith(".json") and "perfiles" in n]
+          print("perfiles dentro de la rueda: %d" % len(js))
+          if len(js) < 13:
+              sys.exit("la rueda salió sin los perfiles: %d" % len(js))
+          EOF
+
+      - name: instalar en un entorno limpio
+        run: |
+          python -m venv /tmp/v
+          /tmp/v/bin/pip install --quiet dist/*.whl
+
+      # El checkout se APARTA: es la única prueba que detecta una rueda rota.
+      - name: correr desde fuera, con el repositorio apartado
+        run: |
+          cp test_precinto.py /tmp/prueba.py
+          mv "$GITHUB_WORKSPACE" "${GITHUB_WORKSPACE}-apartado"
+          mkdir -p /tmp/afuera && cd /tmp/afuera
+          /tmp/v/bin/precinto --version
+          /tmp/v/bin/precinto perfiles
+          /tmp/v/bin/precinto demo --out banco
+          /tmp/v/bin/precinto keygen --out claves
+          /tmp/v/bin/precinto scan banco/support-bundle-demo.tar.gz \
+                  --profile atlassian-dc --out salida --sign claves/private.pem || true
+          /tmp/v/bin/precinto verify salida/manifest.json --public-key claves/public.pem
+          set -o pipefail
+          /tmp/v/bin/python /tmp/prueba.py | tee /tmp/inst.txt
+          N=$(grep -oE '[0-9]+ en verde' /tmp/inst.txt | grep -oE '^[0-9]+' | tail -1)
+          test -n "$N" || { echo "::error::la suite no corrió contra el paquete instalado"; exit 1; }
+          test "$N" -ge "$MIN_PY" || { echo "::error::bajaron las comprobaciones: $N"; exit 1; }
+          mv "${GITHUB_WORKSPACE}-apartado" "$GITHUB_WORKSPACE"
+
+  sin_secretos:
+    name: sin credenciales en el árbol ni en la historia
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # la historia también, no sólo el árbol
+      - name: barrido de patrones de credencial
+        run: |
+          python - <<'EOF'
+          import re, subprocess, sys
+          pats = {
+            "clave privada PEM": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+            "AWS": r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",
+            "GitHub": r"\bgh[pousr]_[A-Za-z0-9]{36}\b",
+            "Slack": r"\bxox[baprs]-[0-9]{9,}",
+            "Stripe": r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}",
+            "IP Tailscale/CGNAT": r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b",
+          }
+          # En BINARIO: la historia tiene blobs que no son UTF-8 y `text=True`
+          # revienta con UnicodeDecodeError antes de mirar un solo patrón — o sea
+          # que el barrido fallaría por una razón que no es la que busca.
+          def leer(cmd, entrada=None):
+              return subprocess.run(cmd, input=entrada,
+                                    capture_output=True).stdout.decode("utf-8", "ignore")
+
+          # Se audita el ÁRBOL ACTUAL (bloqueante) y se AVISA sobre la historia. Un
+          # secreto ya publicado no se arregla fallando la canalización: se arregla
+          # rotándolo y reescribiendo la historia, que es una decisión aparte.
+          archivos = leer(["git", "ls-files"]).splitlines()
+          arbol = leer(["git", "cat-file", "--batch"],
+                       "\n".join("HEAD:%s" % f for f in archivos).encode())
+          objetos = leer(["git", "rev-list", "--objects", "--all"])
+          shas = [l.split()[0] for l in objetos.splitlines() if l.strip()]
+          historia = leer(["git", "cat-file", "--batch"], "\n".join(shas).encode())
+
+          def coincidencias(texto, nombre, patron):
+              if nombre == "clave privada PEM":
+                  # El generador del banco lleva PLANTILLAS con forma de credencial:
+                  # se exige que el cuerpo tenga contenido real, no `\n%s\n`.
+                  cuerpos = re.findall(
+                      r"-----BEGIN [A-Z ]*PRIVATE KEY-----([\s\S]{0,4000}?)-----END", texto)
+                  return [c for c in cuerpos if len(c.strip()) > 100]
+              return re.findall(patron, texto)
+
+          malo = False
+          for nombre, patron in pats.items():
+              en_arbol = coincidencias(arbol, nombre, patron)
+              en_hist = coincidencias(historia, nombre, patron)
+              if en_arbol:
+                  malo = True
+                  print("::error::%s: %d en el ÁRBOL ACTUAL" % (nombre, len(en_arbol)))
+              elif en_hist:
+                  print("::warning::%s: %d sólo en la historia (ya publicado; "
+                        "rotarlo, no basta con borrarlo)" % (nombre, len(en_hist)))
+          sys.exit(1 if malo else 0)
+          EOF

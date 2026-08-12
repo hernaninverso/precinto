@@ -30,7 +30,7 @@ Después de fixear un bug o descubrir un gotcha: appendearlo a `~/.claude/rules/
 - Multi-tenant: el `empresa_id` / `tenant_id` del JWT manda (no el body). Aplicar a todo router que reciba ese campo. RLS donde corresponda.
 - FastAPI: routers montados ANTES del catch-all `@app.get('/{path:path}')`. Imports circulares → import dentro de funciones.
 - Secrets: nunca hardcoded en código ni en `settings.json`. Env vars / Keychain / 1Password. `settings.json` NO expande `${VAR}` → wrapper script (ver `SECRETS_MIGRATION.md`).
-- Server LIVE: `ssh hernan@100.67.255.59` (Tailscale, pre-autorizado). Restart de servicios solo con confirmación. Detalle en `~/.claude/rules/quiron-server.md`.
+- Server LIVE: `ssh hernan@<SERVIDOR>` (Tailscale, pre-autorizado). Restart de servicios solo con confirmación. Detalle en `~/.claude/rules/quiron-server.md`.
 
 ## Development Workflow
 - Tareas no triviales: Spec-Driven Development (spec.md → plan.md → tasks.md → implement). Ver `~/templates/planner-matrix.md` para cuándo usar spec-kit completo vs lite vs nada.

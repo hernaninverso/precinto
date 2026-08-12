@@ -40,10 +40,14 @@ correo malicioso intentaría aprovechar si alguna vez lograra influir en el agen
 
 ## Procedimiento para la opción 3 (el puente)
 
+> `<SERVIDOR>` es la dirección del servidor en la red privada. No va escrita acá:
+> este repositorio es público y la dirección de una máquina interna no tiene por qué
+> estar en él.
+
 Correr **en la Mac**, porque abre un navegador:
 
 ```bash
-ssh -L 3000:localhost:3000 hernan@100.67.255.59
+ssh -L 3000:localhost:3000 hernan@<SERVIDOR>
 # y dentro de la sesión:
 npx -y @gongrzhe/server-gmail-autoauth-mcp auth
 ```
@@ -54,7 +58,7 @@ El túnel de la línea 1 es lo que hace que el redirect de OAuth —que apunta a
 Al terminar, comprobar que de verdad lee, en vez de suponerlo:
 
 ```bash
-ssh hernan@100.67.255.59 'cd ~/quiron-jobs/scripts && \
+ssh hernan@<SERVIDOR> 'cd ~/quiron-jobs/scripts && \
   sed "s#https://api.telegram.org#http://127.0.0.1:9#g" qjob-triage-emails.sh > /tmp/t.sh && \
   QJOBS_HOME=$(mktemp -d) QJOBS_SHADOW=1 bash /tmp/t.sh; echo "exit=$?"'
 ```
