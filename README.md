@@ -36,11 +36,18 @@ python3 precinto.py bench demo/support-bundle-demo.tar.gz \
 ```
 
 Códigos de salida de `scan`: `0` PASA · `3` REVISAR · `4` BLOQUEADO.
-De `verify`: `0` procedencia probada · `2` inválido · `3` integridad sí, procedencia **no**.
+De `verify`: `0` procedencia probada · `2` inválido · `3` integridad sí, procedencia
+**no** · `4` sin firmar.
+
+El verificador del navegador hace las mismas comprobaciones de firma y estructura, y
+además compara el sha256 del paquete si se lo aportás — eso la línea de comandos
+todavía no lo hace.
 
 ## Invariantes
 
-1. **Nunca modifica el original.** Siempre escribe una copia nueva.
+1. **Nunca modifica el original.** Siempre escribe una copia nueva, en un temporal
+   exclusivo que se renombra al final. `--output-name` sólo admite un nombre simple:
+   admitir una ruta permitía truncar el propio paquete de entrada.
 2. **Cero red, cero subprocesos, ninguna credencial de servicio.** Hay un test que corre
    un escaneo completo con `socket.socket`, `create_connection` y `getaddrinfo` anulados y
    falla si algo intenta usarlos. La única clave que toca es la tuya, local, al firmar.
@@ -57,8 +64,8 @@ De `verify`: `0` procedencia probada · `2` inválido · `3` integridad sí, pro
 
 HMAC con sal **efímera**, generada por ejecución y nunca persistida.
 
-- El mismo valor produce el mismo token **dentro de un paquete** → se preserva la
-  correlación («este usuario aparece en cuatro archivos») sin revelar el valor.
+- El mismo valor produce el mismo token **dentro de un paquete y dentro de su misma
+  clase** → se preserva la correlación («este usuario aparece en cuatro archivos») sin revelar el valor.
 - Otra ejecución produce otra sal → no se pueden cruzar dos paquetes ni revertir por
   diccionario.
 
@@ -107,6 +114,6 @@ o un asunto en el repositorio. No mandes paquetes de diagnóstico: no los quiero
 ## Tests
 
 ```bash
-python3 test_precinto.py       # 49 comprobaciones
+python3 test_precinto.py       # 82 comprobaciones
 node test_verificador_web.js   # 26 sobre el verificador del navegador
 ```

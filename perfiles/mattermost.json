@@ -1,0 +1,24 @@
+{
+  "name": "mattermost",
+  "version": "0.1.0",
+  "description": "Mattermost autoalojado — Support Packet. Su base de conocimiento dice que el paquete quita contrasenas y tokens al generarse, pero que el administrador debe revisar y sanear a mano el resto, en especial la configuracion de los complementos, antes de compartirlo.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.key",
+    "*.pem",
+    "config.json.bak",
+    "*.crt"
+  ],
+  "allow_extra_text_ext": [],
+  "extra_terms": [],
+  "severity_policy": {
+    "critical": "pseudonymized",
+    "high": "pseudonymized",
+    "medium": "pseudonymized",
+    "low": "flagged_for_review"
+  },
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

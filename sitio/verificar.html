@@ -91,8 +91,8 @@
 <div class="res" id="res"></div>
 
 <footer>
-  <p><a href="index.html">Precinto</a> — AGPL-3.0 · <a href="https://github.com/hernaninverso/precinto">código</a>. El verificador de línea de comandos hace exactamente las mismas
-  comprobaciones: <code>precinto.py verify manifest.json --public-key public.pem</code></p>
+  <p><a href="index.html">Precinto</a> — AGPL-3.0 · <a href="https://github.com/hernaninverso/precinto">código</a>. El verificador de línea de comandos hace las mismas comprobaciones de firma y
+  estructura; la comparación del paquete por sha256 sólo está acá: <code>precinto.py verify manifest.json --public-key public.pem</code></p>
   <p class="eng" id="eng"></p>
 </footer>
 </div>
@@ -255,7 +255,7 @@ const SCHEMA = {
     tool:      { __keys__: ["name","version"] },
     input:     { __keys__: ["name","sha256","bytes","mode"] },
     output:    { __keys__: ["name","sha256","bytes"] },
-    profile:   { __keys__: ["name","version","sha256"] },
+    profile:   { __keys__: ["name","version","fingerprint"] },
     inventory: { __keys__: ["files_total","inspected","blocked","empty"] },
     coverage:  { __keys__: ["bytes_inspected","bytes_not_inspected","percent_inspected_bp"] },
     findings:  { __item__: { __keys__: ["class","file","line","severity","action","fingerprint"] } },
@@ -367,10 +367,26 @@ function card(kind, title, body) {
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 
 async function run(text) {
+  // Limpiar SIEMPRE antes de validar. Un fallo de base64 o de canonización ocurre
+  // fuera del try de la verificación: si el resultado anterior sigue pintado, una
+  // carga malformada deja en pantalla un "Verificada" que ya no corresponde.
+  res.innerHTML = "";
   let env;
   try { env = JSON.parse(text); }
   catch (e) { res.innerHTML = card("bad", "No es un JSON válido", "<p>" + esc(e.message) + "</p>"); return; }
 
+  // JSON.parse convierte 10.0 en 10 y la diferencia se pierde: Python canoniza
+  // "10.0" y el navegador "10", así que un manifiesto con un flotante validaría
+  // en un lado y no en el otro. Se mira el TEXTO crudo, antes del parseo.
+  const flot = text.match(/:\s*-?\d+\.\d+(?=\s*[,}\]])/);
+  if (flot) {
+    res.innerHTML = card("bad", "Formato inválido",
+      "<p>El manifiesto contiene un número decimal (<code>" + esc(flot[0].trim()) +
+      "</code>). El formato sólo admite enteros: un decimal se serializa distinto en " +
+      "Python que en JavaScript y haría que la firma validara en un lado y no en el " +
+      "otro. Un manifiesto legítimo nunca los lleva.</p>");
+    return;
+  }
   const errs = validateClosed(env, SCHEMA);
   if (errs.length) {
     res.innerHTML = card("bad", "Estructura inválida",

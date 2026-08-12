@@ -97,8 +97,20 @@ class Detector(object):
         self.cls = cls
         self.rx = re.compile(pattern)
         self.severity = severity
-        self.group = group
+        self.group = group          # int, tupla de alternativas, o None
         self.validator = validator
+
+    def pick(self, m):
+        """Devuelve (valor, inicio, fin) del grupo que realmente casó."""
+        g = self.group
+        if g is None:
+            return m.group(0), m.start(0), m.end(0)
+        if isinstance(g, tuple):
+            for gi in g:
+                if m.group(gi) is not None:
+                    return m.group(gi), m.start(gi), m.end(gi)
+            return None, -1, -1
+        return m.group(g), m.start(g), m.end(g)
 
 
 def _luhn_free(_):
@@ -135,13 +147,22 @@ DETECTORS = [
              SEV_CRITICAL, group=1),
     # Sin \b inicial a propósito: `crm_api_key` o `db_password` tienen que matchear.
     # El guion bajo es un carácter de palabra, así que \b se lo comía.
+    # Entre comillas se acepta el valor CON espacios: `password: "correct horse
+    # battery staple"` solo enmascaraba `correct` y el resto de la frase salía
+    # entera. Sin comillas se sigue cortando en el primer espacio, que es lo
+    # correcto: ahí el espacio separa el valor de lo que viene después.
     Detector("password_assignment",
              r"(?i)[A-Za-z0-9_.\-]{0,32}"
              r"(?:password|passwd|pwd|secret|api[_\-]?key|apikey|access[_\-]?token|"
-             r"auth[_\-]?token|client[_\-]?secret|private[_\-]?key)"
-             r"[A-Za-z0-9_.\-]{0,16}"
-             r"\s*[:=]\s*[\"']?([^\s\"',;{}]{6,256})[\"']?",
-             SEV_HIGH, group=1),
+             r"auth[_\-]?token|client[_\-]?secret|private[_\-]?key|passphrase|token|credential|bearer)"
+             # La palabra clave tiene que TERMINAR el identificador: `db_password=`
+             # sí, `token_count=` no. Sin esto se pseudonimizaban
+             # `token_count=100000`, `credential_provider=default` y
+             # `bearer_strategy=enabled`, destruyendo diagnóstico legítimo.
+             r"(?![A-Za-z0-9_])"
+             r"\s*[:=]\s*"
+             r"(?:\"([^\"\r\n]{6,256})\"|'([^'\r\n]{6,256})'|([^\r\n,;{}]{6,256}))",
+             SEV_HIGH, group=(1, 2, 3)),
     Detector("email", r"\b([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,24})\b",
              SEV_MEDIUM, group=1),
     Detector("ipv4", r"\b((?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
@@ -304,6 +325,34 @@ def sha256_bytes(b):
     return hashlib.sha256(b).hexdigest()
 
 
+def sha256_tree(root):
+    """Hash reproducible de un árbol de directorios.
+
+    En modo directorio el manifiesto declaraba `input.sha256 = ""`: se firmaba un
+    vacío, y con él la afirmación "esta entrada es la que dice" no valía nada.
+    Se hashea la lista ORDENADA de (ruta relativa, tamaño, hash del contenido),
+    que es estable entre máquinas y detecta tanto un cambio de contenido como un
+    archivo agregado, quitado o renombrado. Los enlaces simbólicos se ignoran,
+    igual que en la copia.
+    """
+    h = hashlib.sha256()
+    entries = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            if os.path.islink(full):
+                continue
+            entries.append((os.path.relpath(full, root).replace(os.sep, "/"),
+                            os.path.getsize(full), sha256_file(full)))
+    for rel, size, digest in sorted(entries):
+        # surrogateescape: un nombre POSIX puede no ser UTF-8 válido y
+        # `encode("utf-8")` explotaría con un paquete legítimo.
+        h.update(("%s\0%d\0%s\n" % (rel, size, digest))
+                 .encode("utf-8", errors="surrogateescape"))
+    return h.hexdigest(), sum(e[1] for e in entries)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Extracción defensiva
 # ─────────────────────────────────────────────────────────────────────────────
@@ -329,6 +378,90 @@ def _safe_relpath(name):
     if any(p == ".." for p in parts):
         raise UnsafeArchive("path traversal en el archivo: %r" % name)
     return os.path.join(*[p for p in parts if p not in ("", ".")]) if parts else name
+
+
+def _copy_fd_to(path_dst, fd, limite):
+    """Copia desde un descriptor YA abierto y validado. Cuenta los bytes REALES."""
+    total = 0
+    with open(path_dst, "wb") as out:
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limite:
+                raise UnsafeArchive("un archivo creció por encima del límite durante la copia")
+            out.write(chunk)
+    return total
+
+
+def snapshot_tree(src, dest):
+    """Instantánea privada de un directorio, inmune a symlinks y a carreras.
+
+    Tres problemas que esto cierra de una vez:
+
+    - `shutil.copyfile` decide por RUTA antes de abrir, así que entre `islink()` y
+      la copia un atacante puede intercambiar el archivo por un enlace y hacer que
+      termine leyendo un destino externo (CWE-367). Acá cada archivo se abre con
+      `O_NOFOLLOW` **relativo al descriptor del directorio ya validado**, y se
+      comprueba con `fstat` sobre ese mismo descriptor.
+    - El tamaño se contaba con `getsize()` antes de copiar, así que un archivo que
+      crecía después esquivaba los límites. Ahora se cuentan los bytes leídos.
+    - Todo lo posterior —hash, escaneo— trabaja SOBRE ESTA COPIA, no sobre el
+      original, así que ya no hay ventana entre hashear y procesar.
+    """
+    import stat as _stat
+    total = 0
+    count = 0
+    src = os.path.abspath(src)
+
+    def recorrer(dir_fd, rel):
+        nonlocal total, count
+        with os.scandir(dir_fd) as it:
+            entradas = sorted(it, key=lambda e: e.name)
+        for ent in entradas:
+            nombre = ent.name
+            if nombre in (".", ".."):
+                continue
+            try:
+                sub_fd = os.open(nombre, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY,
+                                 dir_fd=dir_fd)
+            except (NotADirectoryError, OSError):
+                sub_fd = None
+            if sub_fd is not None:
+                try:
+                    os.makedirs(os.path.join(dest, rel, nombre), exist_ok=True)
+                    recorrer(sub_fd, os.path.join(rel, nombre))
+                finally:
+                    os.close(sub_fd)
+                continue
+            try:
+                fd = os.open(nombre, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            except OSError:
+                continue                      # enlace simbólico o nodo especial: se ignora
+            try:
+                st = os.fstat(fd)
+                if not _stat.S_ISREG(st.st_mode):
+                    continue                  # sólo archivos regulares
+                count += 1
+                if count > MAX_MEMBERS:
+                    raise UnsafeArchive("demasiados archivos en el directorio (>%d)" % MAX_MEMBERS)
+                destino = os.path.join(dest, rel, nombre)
+                os.makedirs(os.path.dirname(destino), exist_ok=True)
+                leidos = _copy_fd_to(destino, fd, MAX_MEMBER_BYTES)
+                total += leidos
+                if total > MAX_EXPANDED_BYTES:
+                    raise UnsafeArchive("el directorio excede el tamaño total admitido")
+            finally:
+                os.close(fd)
+
+    raiz_fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+    try:
+        os.makedirs(dest, exist_ok=True)
+        recorrer(raiz_fd, "")
+    finally:
+        os.close(raiz_fd)
+    return total
 
 
 def copy_tree_no_symlinks(src, dest):
@@ -431,21 +564,43 @@ def extract_zip(src, dest):
 
 
 def materialize(src, workdir):
-    """Devuelve (raíz_del_contenido, modo). NUNCA toca el original."""
+    """Devuelve (raíz, modo, sha256_de_la_entrada, bytes_de_la_entrada).
+
+    Toma una INSTANTÁNEA privada primero y hashea ESA instantánea. Antes se
+    hasheaba el original y después se volvía a abrir para materializarlo: entre
+    los dos momentos se podía sustituir el archivo, y el manifiesto terminaba
+    firmando el hash de uno mientras la copia salía del otro. Ahora el hash
+    describe exactamente los bytes que se procesaron, por construcción.
+    """
     root = os.path.join(workdir, "input")
     os.makedirs(root, exist_ok=True)
+
     if os.path.isdir(src):
-        copy_tree_no_symlinks(src, os.path.join(root, os.path.basename(os.path.abspath(src))))
-        return root, "directory"
-    size = os.path.getsize(src)
-    if size > MAX_ARCHIVE_BYTES:
-        raise UnsafeArchive("el archivo comprimido supera el límite de entrada")
-    if tarfile.is_tarfile(src):
-        extract_tar(src, root)
-        return root, "tar"
-    if zipfile.is_zipfile(src):
-        extract_zip(src, root)
-        return root, "zip"
+        base = os.path.basename(os.path.abspath(src))
+        snap = os.path.join(root, base)
+        snapshot_tree(src, snap)
+        sha, total = sha256_tree(snap)          # sobre la instantánea, no el original
+        return root, "directory", sha, total
+
+    # Archivo: copiarlo por descriptor y trabajar sólo con esa copia.
+    fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        import stat as _stat
+        st = os.fstat(fd)
+        if not _stat.S_ISREG(st.st_mode):
+            raise UnsafeArchive("la entrada no es un archivo regular")
+        copia = os.path.join(workdir, "entrada.bin")
+        leidos = _copy_fd_to(copia, fd, MAX_ARCHIVE_BYTES)
+    finally:
+        os.close(fd)
+
+    sha = sha256_file(copia)
+    if tarfile.is_tarfile(copia):
+        extract_tar(copia, root)
+        return root, "tar", sha, leidos
+    if zipfile.is_zipfile(copia):
+        extract_zip(copia, root)
+        return root, "zip", sha, leidos
     raise UnsafeArchive("formato de entrada no reconocido (se espera tar, tar.gz, tgz o zip)")
 
 
@@ -516,8 +671,18 @@ def _noise(cls, value):
         dom = value.rsplit("@", 1)[-1].lower()
         if dom in EMAIL_NOISE_DOMAINS or dom.endswith(".example.com"):
             return True
-    if cls == "password_assignment" and len(value.strip("\"'")) < 6:
-        return True
+    if cls == "password_assignment":
+        v = value.strip("\"' ")
+        if len(v) < 6:
+            return True
+        # Valores de configuración que no son secretos por más que la clave se
+        # llame `token` o `secret`.
+        if v.lower() in {"default", "enabled", "disabled", "true", "false", "none",
+                         "null", "auto", "always", "never", "required", "optional",
+                         "unlimited", "inherit", "system", "custom"}:
+            return True
+        if v.isdigit():
+            return True
     return False
 
 
@@ -549,12 +714,10 @@ def scan_text(text, relpath, profile, pseudo, extra_terms_rx):
 
     for det in DETECTORS:
         for m in det.rx.finditer(text_head):
-            gi = det.group
-            value = m.group(gi) if gi else m.group(0)
+            value, start, end = det.pick(m)
             if not value or _noise(det.cls, value):
                 continue
             action = policy.get(det.severity, ACT_REVIEW)
-            start, end = (m.span(gi) if gi else m.span(0))
             fp = pseudo.fingerprint(det.cls, value)
             # TODO hallazgo se enmascara, incluido el marcado para revisión. Antes,
             # un hallazgo REVIEW dejaba el valor ORIGINAL en la copia: el archivo
@@ -576,7 +739,30 @@ def scan_text(text, relpath, profile, pseudo, extra_terms_rx):
     claimed.sort()
     for m in HIGH_ENTROPY_RX.finditer(text_head):
         s, e = m.span(1)
-        if any(s < ce and cs < e for cs, ce in claimed):
+        # Antes se descartaba el candidato ENTERO si tocaba cualquier span ya
+        # reclamado: un valor como `prefijo-entropico-sk-xxxx` quedaba con sólo el
+        # sufijo exacto enmascarado y el prefijo en claro. Ahora se recorta.
+        libres = [(s, e)]
+        for cs, ce in claimed:
+            nuevos = []
+            for a, b in libres:
+                if b <= cs or a >= ce:
+                    nuevos.append((a, b)); continue
+                if a < cs: nuevos.append((a, cs))
+                if b > ce: nuevos.append((ce, b))
+            libres = nuevos
+        if not libres or libres == []:
+            continue
+        if libres != [(s, e)]:
+            for a, b in libres:
+                trozo = text_head[a:b]
+                if len(trozo) < 12 or is_placeholder(trozo):
+                    continue
+                if shannon_entropy(trozo) < profile["entropy_min_bits"]:
+                    continue
+                spans.append((a, b, pseudo.review_token("high_entropy_string", trozo),
+                              "high_entropy_string", SEV_MEDIUM, ACT_REVIEW,
+                              pseudo.fingerprint("high_entropy_string", trozo)))
             continue
         val = m.group(1)
         if is_placeholder(val) or val.isdigit() or val.isalpha():
@@ -590,13 +776,41 @@ def scan_text(text, relpath, profile, pseudo, extra_terms_rx):
     if not spans:
         return text, findings
 
-    # Solapamientos: gana el más severo; a igual severidad, el más largo.
+    # Solapamientos: gana el más severo; a igual severidad, el más largo. Y el
+    # perdedor se RECORTA en vez de descartarse entero: antes, un término ancho
+    # del perfil que contuviera dentro un token crítico hacía que el trozo no
+    # cubierto por el ganador saliera en claro.
     spans.sort(key=lambda t: (SEV_ORDER[t[4]], -(t[1] - t[0]), t[0]))
     chosen = []
     for sp in spans:
-        if any(sp[0] < c[1] and c[0] < sp[1] for c in chosen):
-            continue
-        chosen.append(sp)
+        start, end = sp[0], sp[1]
+        trozos = [(start, end)]
+        for c in chosen:
+            nuevos = []
+            for a, b in trozos:
+                if b <= c[0] or a >= c[1]:
+                    nuevos.append((a, b))
+                    continue
+                if a < c[0]:
+                    nuevos.append((a, c[0]))
+                if b > c[1]:
+                    nuevos.append((c[1], b))
+            trozos = nuevos
+        for a, b in trozos:
+            if b - a <= 0:
+                continue
+            if (a, b) == (start, end):
+                chosen.append(sp)
+            else:
+                # trozo residual: se enmascara igual, con su propio token
+                resto = text_head[a:b]
+                # El residuo hereda la ACCIÓN del span original: antes usaba
+                # siempre pseudo.token(), así que el manifiesto decía "revisar" y
+                # la copia no llevaba la marca <REVISAR:…> por ningún lado.
+                tok = (pseudo.token(sp[3], resto) if sp[5] == ACT_PSEUDONYMIZE
+                       else pseudo.review_token(sp[3], resto))
+                chosen.append((a, b, tok, sp[3], sp[4], sp[5],
+                               pseudo.fingerprint(sp[3], resto)))
     chosen.sort(key=lambda t: t[0])
 
     import bisect
@@ -671,7 +885,7 @@ ENVELOPE_SCHEMA = {
         "tool": {"__keys__": {"name", "version"}},
         "input": {"__keys__": {"name", "sha256", "bytes", "mode"}},
         "output": {"__keys__": {"name", "sha256", "bytes"}},
-        "profile": {"__keys__": {"name", "version", "sha256"}},
+        "profile": {"__keys__": {"name", "version", "fingerprint"}},
         "inventory": {"__keys__": {"files_total", "inspected", "blocked", "empty"}},
         "coverage": {"__keys__": {"bytes_inspected", "bytes_not_inspected", "percent_inspected_bp"}},
         "findings": {"__item__": {"__keys__": {"class", "file", "line", "severity",
@@ -748,12 +962,21 @@ def verify_envelope(env, public_pem_path=None):
         out.extend("   · " + e for e in errs)
         return 2, out
 
+    # "Sin firmar" tiene su propio veredicto y su propio código, igual que en el
+    # verificador del navegador: no es un error de formato, pero tampoco es algo
+    # verificado. Antes Python lo trataba como "algoritmo no admitido" (código 2)
+    # y la web como un aviso benigno: dos herramientas diciendo cosas distintas
+    # del mismo archivo.
+    if env["signature"]["algorithm"] == "none":
+        return 4, ["SIN FIRMAR — este manifiesto se emitió sin --sign. Describe un proceso,",
+                   "pero nada impide que haya sido alterado después: no hay nada que",
+                   "comprobar. Trátalo como texto sin respaldo."]
+    if env["signature"]["algorithm"] != "Ed25519":
+        return 2, ["Algoritmo de firma no admitido: %r" % env["signature"]["algorithm"]]
     try:
         sig = base64.b64decode(env["signature"]["value_b64"], validate=True)
     except Exception:
         return 2, ["Firma con base64 inválido."]
-    if env["signature"]["algorithm"] != "Ed25519":
-        return 2, ["Algoritmo de firma no admitido: %r" % env["signature"]["algorithm"]]
 
     external = public_pem_path is not None
     if external:
@@ -783,32 +1006,55 @@ def verify_envelope(env, public_pem_path=None):
 # ─────────────────────────────────────────────────────────────────────────────
 # Comando: scan
 # ─────────────────────────────────────────────────────────────────────────────
-def _safe_name(name, pseudo):
-    """Sanea un nombre de archivo o de paquete antes de escribirlo en el manifiesto.
+def _safe_name(name, pseudo, terms_rx=None):
+    """Sanea un nombre antes de escribirlo en la copia o en el manifiesto.
 
-    El manifiesto se publica. Un archivo llamado `ghp_<token>.png` se bloquea
-    entero — correcto — pero su NOMBRE terminaba literalmente en
-    `blocked_files[].file`, contradiciendo "el manifiesto nunca contiene el valor
-    de un secreto". Las rutas también llevan nombres de usuario y de cliente.
+    Los detectores se aplican en UNA sola pasada sobre el texto original. Al
+    aplicarlos en cascada, el token de reemplazo de un detector caía dentro del
+    patrón del siguiente y salía anidado: `<GITHUB_TOKEN:<PASSWORD_ASSIGNMENT:…>>`.
+    La extensión conocida se preserva: un paquete cuyos archivos pierden el
+    sufijo deja de ser diagnosticable, que es justo lo que no queremos.
     """
-    out = name
+    if len(name) > 512:
+        name = name[:512] + "\u2026"
+    raiz, ext = os.path.splitext(name)
+    if ext.lower() not in INSPECTABLE_EXT and ext.lower() not in UNINSPECTABLE_EXT:
+        raiz, ext = name, ""
+
+    spans = []
+    if terms_rx is not None:
+        for m in terms_rx.finditer(raiz):
+            spans.append((m.start(), m.end(), pseudo.token("term", m.group(0)), SEV_HIGH))
     for det in DETECTORS:
-        if det.severity not in (SEV_CRITICAL, SEV_HIGH):
+        if det.cls == "private_key_pem":
             continue
-        def _sub(m, d=det):
-            gi = d.group
-            v = m.group(gi) if gi else m.group(0)
-            if not v or _noise(d.cls, v):
-                return m.group(0)
-            tok = pseudo.token(d.cls, v)
-            return m.group(0).replace(v, tok) if gi else tok
-        out = det.rx.sub(_sub, out)
-    for m in list(HIGH_ENTROPY_RX.finditer(out))[::-1]:
+        for m in det.rx.finditer(raiz):
+            valor, a, b = det.pick(m)
+            if not valor or _noise(det.cls, valor):
+                continue
+            spans.append((a, b, pseudo.token(det.cls, valor), det.severity))
+    for m in HIGH_ENTROPY_RX.finditer(raiz):
         v = m.group(1)
-        if not is_placeholder(v) and not v.isalpha() and not v.isdigit() \
-                and shannon_entropy(v) >= 4.2:
-            out = out[:m.start(1)] + pseudo.review_token("high_entropy_string", v) + out[m.end(1):]
-    return out
+        if is_placeholder(v) or v.isalpha() or v.isdigit():
+            continue
+        if shannon_entropy(v) >= 4.2:
+            spans.append((m.start(1), m.end(1),
+                          pseudo.review_token("high_entropy_string", v), SEV_MEDIUM))
+    if not spans:
+        return raiz + ext
+
+    spans.sort(key=lambda t: (SEV_ORDER[t[3]], -(t[1] - t[0]), t[0]))
+    elegidos = []
+    for sp in spans:
+        if any(sp[0] < c[1] and c[0] < sp[1] for c in elegidos):
+            continue
+        elegidos.append(sp)
+    elegidos.sort(key=lambda t: t[0])
+    out, cur = [], 0
+    for a, b, tok, _sev in elegidos:
+        out.append(raiz[cur:a]); out.append(tok); cur = b
+    out.append(raiz[cur:])
+    return "".join(out) + ext
 
 
 def build_terms_rx(terms):
@@ -825,31 +1071,49 @@ def cmd_scan(args):
     if not os.path.exists(src):
         die("No existe la entrada: %s" % src)
     profile = load_profile(args.profile)
-    profile_sha = sha256_bytes(_canonical(profile))
     pseudo = Pseudonymizer()
+    # El hash del perfil se SALA. Sin sal era un oráculo de diccionario: el perfil
+    # contiene `extra_terms` — nombres de clientes, proyectos y plantas, todos de
+    # baja entropía — así que cualquiera con una lista de candidatos podía
+    # confirmar cuáles están dentro probando hashes contra el manifiesto público.
+    # Con la sal efímera el hash sigue sirviendo para lo único que tiene que
+    # servir: comparar dos ejecuciones del MISMO paquete, no identificar el perfil.
+    profile_sha = pseudo.fingerprint("profile", _canonical(profile).decode("utf-8"))
     terms_rx = build_terms_rx(profile.get("extra_terms"))
 
-    outdir = os.path.abspath(args.out)
-    # "Nunca modifica el original" era falso con `scan ./b --out ./b/salida`:
-    # se creaba y escribía dentro del propio paquete de entrada.
+    # "Nunca modifica el original" era falso por DOS vías, y la segunda destruía
+    # datos: `--output-name /ruta/al/original.tar.gz` esquivaba esta comprobación
+    # —que sólo miraba el directorio— y _pack() truncaba el original con w:gz.
+    # Medido: 2755 -> 1774 bytes. Y un --out que fuese enlace hacia la entrada
+    # esquivaba commonpath() porque se comparaba con abspath, no con realpath.
+    src_real = os.path.realpath(src)
+    os.makedirs(os.path.abspath(args.out), exist_ok=True)
+    outdir = os.path.realpath(args.out)
     try:
-        inside = os.path.commonpath([os.path.abspath(src), outdir]) == os.path.abspath(src)
+        inside = os.path.commonpath([src_real, outdir]) == src_real
     except ValueError:
         inside = False
-    if os.path.isdir(src) and inside:
-        die("--out (%s) está dentro de la entrada (%s). La salida no puede escribirse "
-            "dentro del paquete original." % (outdir, src))
-    os.makedirs(outdir, exist_ok=True)
+    if os.path.isdir(src_real) and inside:
+        die("--out (%s) queda dentro de la entrada (%s). La salida no puede escribirse "
+            "dentro del paquete original." % (outdir, src_real))
+
+    if args.output_name is not None:
+        n = args.output_name
+        if os.path.isabs(n) or re.search(r"[\\/]", n) or n in (".", "..") or n.startswith("."):
+            die("--output-name debe ser un nombre de archivo simple, sin rutas ni "
+                "separadores ni empezar con punto. Recibido: %r" % n)
     workdir = tempfile.mkdtemp(prefix="precinto-")
     sanitized_root = os.path.join(workdir, "sanitized")
     os.makedirs(sanitized_root, exist_ok=True)
 
+
     findings, blocked = [], []
     n_files = n_inspected = n_empty = 0
     bytes_inspected = bytes_blocked = 0
+    memo_rutas = {}
 
     try:
-        root, mode = materialize(src, workdir)
+        root, mode, in_sha, in_bytes = materialize(src, workdir)
 
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames
@@ -861,20 +1125,21 @@ def cmd_scan(args):
                 rel = os.path.relpath(abspath, root)
                 n_files += 1
                 size = os.path.getsize(abspath)
+                rel_seguro = _safe_relname(rel, pseudo, terms_rx, memo_rutas)
                 if size == 0:
                     n_empty += 1
-                    _copy_into(sanitized_root, rel, b"")
+                    _copy_into(sanitized_root, rel_seguro, b"")
                     continue
 
                 verdict, reason = classify(rel, abspath, profile)
                 if verdict == "block":
-                    blocked.append(OrderedDict([("file", _safe_name(rel, pseudo)),
+                    blocked.append(OrderedDict([("file", rel_seguro),
                                                 ("reason", reason), ("bytes", size)]))
                     bytes_blocked += size
                     continue
 
                 if size > MAX_MEMBER_BYTES:
-                    blocked.append(OrderedDict([("file", _safe_name(rel, pseudo)),
+                    blocked.append(OrderedDict([("file", rel_seguro),
                                                 ("reason", "excede el tamaño inspeccionable"),
                                                 ("bytes", size)]))
                     bytes_blocked += size
@@ -883,10 +1148,10 @@ def cmd_scan(args):
                     raw = fh.read()
                 text = raw.decode("utf-8", errors="replace")
                 try:
-                    clean, f = scan_text(text, _safe_name(rel, pseudo), profile,
+                    clean, f = scan_text(text, rel_seguro, profile,
                                          pseudo, terms_rx)
                 except TooLargeToInspect:
-                    blocked.append(OrderedDict([("file", _safe_name(rel, pseudo)),
+                    blocked.append(OrderedDict([("file", rel_seguro),
                                                 ("reason", "excede el tamaño inspeccionable"),
                                                 ("bytes", size)]))
                     bytes_blocked += size
@@ -894,7 +1159,7 @@ def cmd_scan(args):
                 findings.extend(f)
                 n_inspected += 1
                 bytes_inspected += size
-                _copy_into(sanitized_root, rel, clean.encode("utf-8"))
+                _copy_into(sanitized_root, rel_seguro, clean.encode("utf-8"))
 
         total_bytes = bytes_inspected + bytes_blocked
         pct = (100.0 * bytes_inspected / total_bytes) if total_bytes else 100.0
@@ -910,7 +1175,24 @@ def cmd_scan(args):
                   "BLOCKED": ".RETENIDO-con-bloqueos.tar.gz"}[status]
         out_name = args.output_name or (_base_no_ext(src) + sufijo)
         out_path = os.path.join(outdir, out_name)
-        _pack(sanitized_root, out_path)
+        # Comprobación final sobre la ruta ya resuelta: ni el destino ni el
+        # manifiesto pueden caer fuera de outdir ni sobre la entrada.
+        out_real = os.path.realpath(out_path)
+        if os.path.dirname(out_real) != outdir:
+            die("el destino resuelto (%s) queda fuera de --out (%s)" % (out_real, outdir))
+        if out_real == src_real:
+            die("el destino coincide con la entrada: no se sobrescribe el original")
+        # Escribir a un temporal exclusivo y renombrar: si algo falla a mitad, el
+        # destino no queda con un tar truncado.
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix=".precinto-", suffix=".part", dir=outdir)
+        os.close(tmp_fd)
+        try:
+            _pack(sanitized_root, tmp_path)
+            os.replace(tmp_path, out_path)
+        except BaseException:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
 
         limitations = [
             "La detección es best-effort: NO se garantiza haber encontrado toda la "
@@ -930,16 +1212,16 @@ def cmd_scan(args):
             ("manifest_format", MANIFEST_FORMAT),
             ("tool", OrderedDict([("name", TOOL_NAME), ("version", TOOL_VERSION)])),
             ("generated_utc", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
-            ("input", OrderedDict([("name", _safe_name(os.path.basename(src), pseudo)),
-                                   ("sha256", sha256_file(src) if os.path.isfile(src) else ""),
-                                   ("bytes", os.path.getsize(src) if os.path.isfile(src) else 0),
+            ("input", OrderedDict([("name", _safe_name(os.path.basename(src), pseudo, terms_rx)),
+                                   ("sha256", in_sha),
+                                   ("bytes", in_bytes),
                                    ("mode", mode)])),
-            ("output", OrderedDict([("name", _safe_name(os.path.basename(out_path), pseudo)),
+            ("output", OrderedDict([("name", _safe_name(os.path.basename(out_path), pseudo, terms_rx)),
                                     ("sha256", sha256_file(out_path)),
                                     ("bytes", os.path.getsize(out_path))])),
-            ("profile", OrderedDict([("name", _safe_name(profile["name"], pseudo)),
-                                     ("version", _safe_name(profile["version"], pseudo)),
-                                     ("sha256", profile_sha)])),
+            ("profile", OrderedDict([("name", _safe_name(profile["name"], pseudo, terms_rx)),
+                                     ("version", _safe_name(profile["version"], pseudo, terms_rx)),
+                                     ("fingerprint", profile_sha)])),
             ("rules_version", RULES_VERSION),
             ("inventory", OrderedDict([("files_total", n_files), ("inspected", n_inspected),
                                        ("blocked", len(blocked)), ("empty", n_empty)])),
@@ -981,6 +1263,27 @@ def _base_no_ext(p):
     return b
 
 
+def _safe_relname(rel, pseudo, terms_rx, memo):
+    """Sanea cada componente de la ruta ANTES de escribir la copia.
+
+    Antes el saneo era sólo para el manifiesto: un archivo `ghp_<token>.log` con
+    el contenido limpio salía del perímetro igual, con el secreto en el NOMBRE
+    dentro del tar, y el estado podía ser PASS. El memo mantiene la resolución
+    determinista y evita que dos nombres distintos colapsen en el mismo.
+    """
+    if rel in memo:
+        return memo[rel]
+    partes = []
+    for comp in rel.replace(os.sep, "/").split("/"):
+        limpio = _safe_name(comp, pseudo, terms_rx)
+        partes.append(limpio)
+    nuevo = "/".join(partes)
+    if nuevo != rel and nuevo in memo.values():
+        nuevo = "%s~%d" % (nuevo, len(memo))
+    memo[rel] = nuevo
+    return nuevo
+
+
 def _copy_into(root, rel, data):
     dst = os.path.join(root, rel)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -989,11 +1292,24 @@ def _copy_into(root, rel, data):
 
 
 def _pack(root, out_path):
+    """Empaqueta normalizando la metadata.
+
+    `tf.add()` copia propietario, grupo, permisos y fechas de los archivos
+    temporales: eso filtra el usuario y el grupo de la máquina que ejecutó
+    Precinto dentro de un paquete que va a salir de la organización.
+    """
     with tarfile.open(out_path, "w:gz") as tf:
         for dirpath, _dirs, files in os.walk(root):
             for fn in sorted(files):
                 full = os.path.join(dirpath, fn)
-                tf.add(full, arcname=os.path.relpath(full, root))
+                arc = os.path.relpath(full, root)
+                info = tf.gettarinfo(full, arcname=arc)
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mode = 0o644
+                info.mtime = 0
+                with open(full, "rb") as fh:
+                    tf.addfile(info, fh)
 
 
 def _report(manifest, findings, out_path, man_path, signed):
@@ -1056,7 +1372,7 @@ def cmd_bench(args):
     flagged_at = set()          # (archivo, línea) marcados para revisión
     total_lines = 0
     try:
-        content_root, _mode = materialize(root, workdir)
+        content_root, _mode, _sha, _b = materialize(root, workdir)
         for dirpath, _d, files in os.walk(content_root):
             for fn in sorted(files):
                 abspath = os.path.join(dirpath, fn)

@@ -1,0 +1,22 @@
+{
+  "name": "stirling-pdf",
+  "version": "0.1.0",
+  "description": "Stirling PDF — bundle de diagnostico. Su documentacion pide activar siempre la redaccion si se va a compartir el bundle en publico, por ejemplo en un issue de GitHub: el caso mas expuesto de todos.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.key",
+    "*.pem",
+    "*.jks"
+  ],
+  "allow_extra_text_ext": [],
+  "extra_terms": [],
+  "severity_policy": {
+    "critical": "pseudonymized",
+    "high": "pseudonymized",
+    "medium": "pseudonymized",
+    "low": "flagged_for_review"
+  },
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}

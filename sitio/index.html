@@ -95,7 +95,7 @@ python3 precinto.py scan support-bundle.tar.gz \
 
 <h3>Y qué no hace, nunca</h3>
 <ul>
-  <li>No modifica el original. Siempre escribe una copia nueva.</li>
+  <li>No modifica el original. Escribe una copia nueva en un temporal exclusivo que se renombra al final, y <code>--output-name</code> sólo admite un nombre simple: admitir una ruta permitía truncar el propio paquete de entrada.</li>
   <li>No abre sockets. Comprobado <em>en la suite</em>: hay un test que corre un escaneo completo con <code>socket.socket</code>, <code>create_connection</code> y <code>getaddrinfo</code> anulados, y falla si algo intenta usarlos.</li>
   <li>No pide credenciales de ningún servicio y no lanza subprocesos. La única clave que toca es la tuya, local, y sólo si le pedís firmar.</li>
   <li>No manda estadísticas, ni de uso ni anónimas.</li>
@@ -109,12 +109,12 @@ python3 precinto.py scan support-bundle.tar.gz \
     <tr><td>Una credencial reconocida por una regla exacta</td><td>Se reemplaza por un pseudónimo estable</td></tr>
     <tr><td>Una cadena ambigua, de alta entropía</td><td>Se <strong>enmascara igual</strong> y se marca con <code>&lt;REVISAR:…&gt;</code>. La revisión decide si se <em>restaura</em>, no si se tapa: dejar el valor en claro mientras alguien decide era dejarlo salir</td></tr>
     <tr><td>Un formato que no se puede inspeccionar con garantías</td><td>El archivo se <strong>bloquea entero</strong>. No sale</td></tr>
-    <tr><td>Una traza de diagnóstico legítima</td><td>Queda intacta. Anonimizar destruyendo el diagnóstico no sirve a nadie</td></tr>
+    <tr><td>Una traza de diagnóstico legítima</td><td>Queda intacta. La palabra clave tiene que <em>terminar</em> el identificador —<code>db_password=</code> sí, <code>token_count=</code> no— porque anonimizar destruyendo el diagnóstico no sirve a nadie</td></tr>
   </tbody>
 </table></div>
 
 <h3>Pseudónimos que conservan el diagnóstico</h3>
-<p>El mismo valor produce el mismo token <strong>dentro de un paquete</strong>: el equipo de soporte sigue viendo que «este usuario aparece en cuatro archivos» sin ver quién es. Otra ejecución usa otra sal, así que dos paquetes no se pueden cruzar ni revertir por diccionario. La sal es efímera y no se guarda en ningún lado.</p>
+<p>El mismo valor produce el mismo token <strong>dentro de un paquete y de su misma clase</strong>: el equipo de soporte sigue viendo que «este usuario aparece en cuatro archivos» sin ver quién es. Otra ejecución usa otra sal, así que dos paquetes no se pueden cruzar ni revertir por diccionario. La sal es efímera y no se guarda en ningún lado.</p>
 
 <h2>Lo que el manifiesto no puede probar</h2>
 <div class="box">
@@ -136,7 +136,7 @@ python3 precinto.py scan support-bundle.tar.gz \
     <tr><td>Neutralizados — reemplazados por pseudónimo</td><td class="n">16</td></tr>
     <tr><td>Retenidos — su archivo se bloqueó entero</td><td class="n">1</td></tr>
     <tr><td><strong>Escapados</strong> — presentes en la copia sin marcar</td><td class="n"><strong>0</strong></td></tr>
-    <tr><td>Comprobaciones de regresión (Python + verificador web)</td><td class="n">75</td></tr>
+    <tr><td>Comprobaciones de regresión (Python + verificador web)</td><td class="n">108</td></tr>
   </tbody>
 </table></div>
 <p>El banco está en el repositorio y se regenera con semilla fija: cualquiera reproduce estos números en su máquina en menos de un minuto. Y el desglose distingue estados en vez de decir «contenido / no contenido», porque un banco binario se felicita a sí mismo — la primera versión de éste informaba 100% sin haber medido nada.</p>

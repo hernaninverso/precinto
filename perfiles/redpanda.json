@@ -1,0 +1,23 @@
+{
+  "name": "redpanda",
+  "version": "0.1.0",
+  "description": "Redpanda autogestionado — debug bundle de rpk. Recoge entorno, configuracion y registros del cluster en un zip que se manda a soporte.",
+  "deny_files": [
+    "*.p12",
+    "*.pfx",
+    "*.key",
+    "*.pem",
+    "redpanda.yaml.bak",
+    "*.jks"
+  ],
+  "allow_extra_text_ext": [],
+  "extra_terms": [],
+  "severity_policy": {
+    "critical": "pseudonymized",
+    "high": "pseudonymized",
+    "medium": "pseudonymized",
+    "low": "flagged_for_review"
+  },
+  "entropy_min_bits": 4.2,
+  "block_uninspectable": true
+}
