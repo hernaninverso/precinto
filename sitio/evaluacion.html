@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Precinto — sala de evaluación</title>
+<meta name="description" content="Los números de Precinto, con el comando para reproducirlos en tu máquina. Incluye lo que NO detecta.">
+<style>
+  :root{--bg:#faf9f7;--panel:#fff;--ink:#1a1a1a;--ink-2:#4a4a4a;--ink-3:#6f6f6f;
+    --line:#e2ddd6;--line-2:#cfc8be;--accent:#8a2f24;--ok:#2f6b3d;--ok-soft:#eaf2ec;
+    --warn:#8a6a1f;--warn-soft:#f7f1e2;--bad:#8a2f24;--bad-soft:#f7ecea;
+    --code-bg:#f2efe9;--code-ink:#2a2a2a}
+  @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+    --bg:#16151a;--panel:#1e1d24;--ink:#eceaf0;--ink-2:#bfbcc7;--ink-3:#918e9c;
+    --line:#312f3a;--line-2:#413e4c;--accent:#e08a7a;--ok:#8fcf9f;--ok-soft:#1d2a20;
+    --warn:#e0bd72;--warn-soft:#2b2519;--bad:#e08a7a;--bad-soft:#2c1f1e;
+    --code-bg:#26242c;--code-ink:#dcd9e2}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16.5px/1.62 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+  .wrap{max-width:820px;margin:0 auto;padding:52px 24px 100px}
+  .brand{font:600 12px/1 ui-sans-serif,-apple-system,system-ui,sans-serif;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 18px}
+  .brand a{color:inherit;text-decoration:none}
+  h1{font-size:2rem;line-height:1.18;margin:0 0 14px;font-weight:600;letter-spacing:-.014em}
+  .lede{font-size:1.1rem;line-height:1.55;color:var(--ink-2);margin:0 0 28px}
+  h2{font-size:1.28rem;font-weight:600;margin:44px 0 12px;padding-bottom:7px;
+    border-bottom:1px solid var(--line)}
+  h3{font-size:1.02rem;font-weight:600;margin:26px 0 8px}
+  p{margin:0 0 14px} ul,ol{margin:0 0 15px;padding-left:1.3em} li{margin-bottom:6px}
+  a{color:var(--accent)}
+  code{font:.87em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);
+    padding:.12em .38em;border-radius:3px}
+  pre{background:var(--code-bg);color:var(--code-ink);border:1px solid var(--line);
+    border-radius:5px;padding:15px 17px;overflow-x:auto;margin:14px 0;
+    font:13px/1.62 ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre.copy{border-left:3px solid var(--accent)}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:15px 18px;margin:20px 0}
+  .box.good{border-left:3px solid var(--ok);background:var(--ok-soft)}
+  .box.warn{border-left:3px solid var(--warn);background:var(--warn-soft)}
+  .box.bad{border-left:3px solid var(--bad);background:var(--bad-soft)}
+  .box p:last-child{margin:0}
+  .lbl{font:600 11px/1.3 ui-sans-serif,-apple-system,system-ui,sans-serif;letter-spacing:.12em;
+    text-transform:uppercase;display:block;margin-bottom:6px;opacity:.82}
+  .tw{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:4px;background:var(--panel)}
+  table{border-collapse:collapse;width:100%;min-width:460px;
+    font:14.5px/1.5 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  th{text-align:left;font:600 11.5px/1.3 ui-sans-serif,-apple-system,system-ui,sans-serif;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding:10px 13px;
+    border-bottom:1.5px solid var(--line-2);white-space:nowrap}
+  td{padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ok{color:var(--ok);font-weight:600} .no{color:var(--bad);font-weight:600}
+  footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink-3);
+    font:13.5px/1.6 ui-sans-serif,-apple-system,system-ui,sans-serif}
+  @media (max-width:600px){.wrap{padding:34px 18px 70px}h1{font-size:1.6rem}}
+</style>
+<div class="wrap">
+<p class="brand"><a href="index.html">Precinto</a> · sala de evaluación</p>
+<h1>Los números, y el comando para desconfiar de ellos</h1>
+<p class="lede">Todo lo que se afirma en el sitio se mide acá, con el comando que lo reproduce en tu máquina en menos de un minuto. Incluida la parte que no favorece al producto.</p>
+
+<div class="box good">
+  <span class="lbl">Reproducilo entero</span>
+  <pre class="copy" style="margin:0">pip install precinto
+
+precinto demo --out banco
+precinto bench banco/support-bundle-demo.tar.gz \
+         --canaries banco/canaries.json --profile demo</pre>
+</div>
+
+<h2>Qué mide el banco</h2>
+<p>Un paquete de diagnóstico sintético con <strong>17 canarios en 14 clases</strong>: credenciales, cadenas de conexión, identificadores personales y nombres internos, plantados en registros, configuración, variables de entorno y volcados binarios. Ningún valor es real; se generan con semilla fija, así que cualquiera obtiene exactamente los mismos.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Desenlace</th><th>Qué significa</th><th class="n">Cantidad</th></tr></thead>
+  <tbody>
+    <tr><td>Neutralizado</td><td>reemplazado por un pseudónimo estable</td><td class="n">15</td></tr>
+    <tr><td>Retenido</td><td>su archivo se bloqueó entero por no ser inspeccionable</td><td class="n">1</td></tr>
+    <tr><td>Marcado</td><td>también enmascarado, pero con una decisión humana pendiente</td><td class="n">1</td></tr>
+    <tr><td class="ok"><strong>Escapado</strong></td><td><strong>salió en claro sin que nadie lo señalara</strong></td><td class="n ok"><strong>0</strong></td></tr>
+  </tbody>
+</table></div>
+
+<p>El desglose tiene cuatro estados y no dos a propósito. <strong>Un banco binario se felicita solo</strong>: la primera versión de éste informaba 100% sin haber medido nada, porque comparaba cada canario contra cada archivo y lo daba por contenido en cuanto faltaba en uno cualquiera. Y hubo una segunda vez: cuando pasamos a enmascarar también lo marcado, la condición «el valor ya no está» ganaba siempre y el estado «marcado» se volvió inalcanzable — este sitio llegó a publicar 16 neutralizados cuando eran 15 más 1 marcado.</p>
+
+<h2>Contra la línea de base</h2>
+<p>La pregunta que corresponde no es «¿encuentra cosas?» sino <strong>«¿encuentra más que un guion de veinte líneas con expresiones regulares?»</strong>. Medido sobre el mismo banco:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Método</th><th class="n">Contenidos</th><th class="n">Tiempo</th></tr></thead>
+  <tbody>
+    <tr><td>Expresiones regulares obvias (contraseña, clave de AWS, token de GitHub, PEM, correo)</td><td class="n no">6 de 17 · 35%</td><td class="n">1 ms</td></tr>
+    <tr><td><strong>Precinto</strong> — reglas, política, bloqueo de formatos</td><td class="n ok">17 de 17 · 100%</td><td class="n">5 ms</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Lo que la línea de base deja pasar</h3>
+<p>Es la lista que importa, porque describe qué estás comprando:</p>
+<div class="tw"><table>
+  <thead><tr><th>Clase</th><th>Dónde estaba</th></tr></thead>
+  <tbody>
+    <tr><td>token JWT</td><td><code>logs/app.log</code></td></tr>
+    <tr><td>cadena de conexión con contraseña</td><td><code>logs/app.log</code></td></tr>
+    <tr><td>cabecera <code>Authorization: Bearer</code></td><td><code>logs/app.log</code></td></tr>
+    <tr><td>dirección de red interna</td><td><code>logs/app.log</code></td></tr>
+    <tr><td>asignación de contraseña en YAML</td><td><code>config/application.yaml</code></td></tr>
+    <tr><td>clave de OpenAI y de Stripe</td><td><code>config/.env</code></td></tr>
+    <tr><td>token de Slack</td><td><code>support/diagnostics.json</code></td></tr>
+    <tr><td>nombres de cliente y de proyecto</td><td><code>support/diagnostics.json</code></td></tr>
+    <tr><td>cadena opaca de alta entropía</td><td><code>logs/worker.log</code></td></tr>
+  </tbody>
+</table></div>
+
+<div class="box warn">
+  <span class="lbl">Y lo que este número NO dice</span>
+  <p><strong>Es un banco sintético.</strong> Mide que los detectores encuentran lo que se les plantó — no qué encontrarían en tus paquetes, que es la única pregunta que importa. Un banco propio siempre favorece a quien lo escribió: los canarios los elegí yo, sabiendo qué detecta la herramienta.</p>
+  <p style="margin-top:10px">Por eso el paso siguiente con un fabricante es correrlo sobre <em>su</em> corpus, en <em>su</em> máquina, con la herramienta sin ver nada. Si en tus datos el número es malo, es un resultado útil y lo diré.</p>
+</div>
+
+<h2>Lo que no hace, comprobado</h2>
+<div class="tw"><table>
+  <thead><tr><th>Afirmación</th><th>Cómo se comprueba</th></tr></thead>
+  <tbody>
+    <tr><td>No abre conexiones de red</td><td>un test corre un escaneo completo con <code>socket.socket</code>, <code>create_connection</code> y <code>getaddrinfo</code> anulados, y falla si algo intenta usarlos</td></tr>
+    <tr><td>Nunca modifica el original</td><td>tests con <code>--output-name</code> apuntando al propio original, con <code>..</code>, con el nombre reservado del manifiesto, y con el manifiesto siendo un enlace simbólico</td></tr>
+    <tr><td>El manifiesto no lleva valores de secreto</td><td>se comprueba que ningún canario aparezca en el JSON, incluidos los que estaban en <em>nombres</em> de archivo</td></tr>
+    <tr><td>Una firma falsificada no pasa</td><td>clave identidad con S=0 —la firma universal— rechazada; codificación prohibida rechazada; 200 firmas legítimas de OpenSSL aceptadas</td></tr>
+    <tr><td>La copia no importa archivos de fuera</td><td>enlaces simbólicos a archivos y a directorios externos: no se copian ni se siguen</td></tr>
+  </tbody>
+</table></div>
+
+<pre class="copy">git clone https://github.com/hernaninverso/precinto.git &amp;&amp; cd precinto
+python3 test_precinto.py        # 104 comprobaciones
+node test_verificador_web.js    # 26 sobre el verificador del navegador</pre>
+
+<h2>Tres auditorías adversarias</h2>
+<p>El código pasó por tres pases de auditoría con un modelo de frontera, con el encargo explícito de demolerlo. <strong>Dos encontraron fallos que destruían datos del usuario</strong>, y los tres informes están resumidos acá porque ocultarlos sería exactamente lo que este proyecto critica.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Pase</th><th>Lo más grave que encontró</th></tr></thead>
+  <tbody>
+    <tr><td>Primero</td><td>Un perfil con una acción inventada dejaba el token <strong>intacto</strong> y el resultado seguía siendo «pasa». Y el verificador del navegador aceptaba una <strong>firma universalmente falsificable</strong> (clave identidad, R identidad, S=0): daba «Verificada» a cualquier mensaje.</td></tr>
+    <tr><td>Segundo</td><td><code>--output-name</code> con una ruta <strong>truncaba el paquete original</strong>: reproducido, de 2755 a 1774 bytes. Y <code>shutil.copytree(symlinks=False)</code> <em>sigue</em> los enlaces en vez de preservarlos, así que importaba archivos de fuera del paquete.</td></tr>
+    <tr><td>Tercero</td><td>El manifiesto se escribía <strong>sin ninguna</strong> de las comprobaciones puestas para el tar: una entrada llamada <code>manifest.json</code> se procesaba bien y después se destruía.</td></tr>
+  </tbody>
+</table></div>
+
+<div class="box bad">
+  <span class="lbl">La lección que más vale de las tres</span>
+  <p>La primera auditoría corrió <strong>después</strong> de publicar. Fue el error, y por eso las otras dos corrieron antes. Un producto que sostiene que la evidencia debe preceder a la afirmación no puede auditarse a posteriori.</p>
+</div>
+
+<footer>
+  <p><strong>Precinto</strong> — AGPL-3.0 · <a href="index.html">portada</a> · <a href="verificar.html">verificador</a> · <a href="https://github.com/hernaninverso/precinto">código</a></p>
+  <p style="margin-top:8px">Cada versión publica su inventario de componentes, los hashes y una procedencia firmada: <code>gh attestation verify precinto-*.whl -R hernaninverso/precinto</code></p>
+</footer>
+</div>
+</html>
