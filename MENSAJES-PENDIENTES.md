@@ -1,4 +1,21 @@
-# Mensajes listos para enviar — los envía Hernán
+# Mensajes a los pedidos abiertos
+
+> **Estado 2026-08-12.**
+>
+> **Grafana: PUBLICADO.** Está en
+> <https://github.com/grafana/alloy/issues/500#issuecomment-5261325583> — el primer
+> comentario del ticket en tres años. (`grafana/agent#2796` no se pudo: ese
+> repositorio quedó archivado el 11 de agosto, así que `alloy` es el vivo.)
+>
+> **Atlassian: falta tu sesión.** El tracker público sólo ofrece «Log In», el estado
+> y «Export» a quien no está identificado: sin sesión no hay formulario de
+> comentario. Iniciá sesión en <https://jira.atlassian.com> y lo publico yo.
+>
+> Dato útil del ticket: **5 votos, 5 observadores**, y un comentario de mayo de 2025
+> que describe el dolor mejor que cualquier argumento de venta — *«some logs can
+> generate 100s of thousands of lines of information which can be a bit overwhelming
+> for staff that have to review these logs to make sure there is no sensitive
+> information»*.
 
 Estos dos mensajes están redactados, verificados y listos. **No los envío yo**: son
 comunicación pública en nombre de Hernán, en el foro de otra empresa, y una vez
