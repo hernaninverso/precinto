@@ -84,13 +84,14 @@
 <p>La misma lógica se aplica al verificador de esta web: valida la firma <strong>dentro de tu navegador</strong>, con la aritmética de curva incluida en la propia página. Podés desconectar la red, guardarla y seguir usándola.</p>
 
 <h2 id="instalar">Qué se instala</h2>
-<p>Un solo archivo de Python, sin dependencias más allá de <code>cryptography</code> para la firma. No hay servicio, no hay demonio, no hay puerto a la escucha, no hay proceso residente.</p>
-<pre>git clone https://github.com/hernaninverso/precinto.git &amp;&amp; cd precinto
+<p>Un paquete de Python con una sola dependencia, <code>cryptography</code>, y sólo para la firma. No hay servicio, no hay demonio, no hay puerto a la escucha, no hay proceso residente.</p>
+<pre>pip install precinto
 
-python3 precinto.py keygen --out claves
-python3 precinto.py scan support-bundle.tar.gz \
-        --profile perfiles/atlassian-dc.json \
-        --out salida --sign claves/private.pem</pre>
+precinto keygen --out claves
+precinto scan support-bundle.tar.gz \
+         --profile atlassian-dc \
+         --out salida --sign claves/private.pem</pre>
+<p><code>precinto perfiles</code> lista los trece adaptadores incluidos. <code>--profile</code> acepta el nombre de uno de ellos o la ruta a uno propio.</p>
 <p>Sale una copia saneada y un <code>manifest.json</code>. Códigos de salida: <code>0</code> pasa · <code>3</code> requiere revisión humana · <code>4</code> bloqueado.</p>
 
 <h3>Y qué no hace, nunca</h3>

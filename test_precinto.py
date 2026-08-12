@@ -19,7 +19,11 @@ import tempfile
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import precinto as bg  # noqa: E402
+# `precinto.cli` funciona igual desde el checkout y desde el paquete instalado.
+# Un `import precinto` a secas resolvía al módulo suelto antes y al paquete después:
+# la suite pasaba en el repositorio y explotaba contra la rueda, que es justo el
+# escenario que hay que poder probar.
+from precinto import cli as bg  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -482,8 +486,15 @@ def test_tercera_tanda():
     d = tmpdir()
     try:
         import io, contextlib, hashlib, tarfile
+        # El paquete se GENERA acá: depender de `demo/…` del checkout hacía que la
+        # suite fallara al correr contra el paquete instalado, que es precisamente
+        # la única forma de probar que la rueda no está rota.
         orig = os.path.join(d, "b.tar.gz")
-        shutil.copy("demo/support-bundle-demo.tar.gz", orig)
+        semilla = os.path.join(d, "semilla"); os.makedirs(semilla)
+        with open(os.path.join(semilla, "app.log"), "w") as fh:
+            fh.write("token=ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + "\n")
+        with tarfile.open(orig, "w:gz") as tf:
+            tf.add(os.path.join(semilla, "app.log"), arcname="app.log")
         antes = hashlib.sha256(open(orig, "rb").read()).hexdigest()
         priv, _pub = bg.keygen(os.path.join(d, "k"))
 
@@ -504,7 +515,7 @@ def test_tercera_tanda():
 
         # el hash del manifiesto describe los bytes procesados
         class B(object):
-            bundle = orig; profile = "perfiles/demo.json"; out = os.path.join(d, "o")
+            bundle = orig; profile = None; out = os.path.join(d, "o")
             output_name = None; sign = priv
         with contextlib.redirect_stdout(io.StringIO()): bg.cmd_scan(B())
         man = json.load(open(os.path.join(d, "o", "manifest.json")))["manifest"]

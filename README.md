@@ -21,19 +21,31 @@ puede mandar su paquete lleno de datos sensibles a un servicio en la nube para p
 si contiene datos sensibles.** La circularidad obliga a que la herramienta viva del lado
 del cliente.
 
+## Instalación
+
+```bash
+pip install precinto
+```
+
+O desde el repositorio, sin instalar nada: `python3 precinto.py …` sigue funcionando.
+
 ## Uso
 
 ```bash
-python3 make_canary_bundle.py --out demo          # paquete sintético con canarios
-python3 precinto.py keygen --out claves         # par Ed25519
+precinto demo --out banco          # paquete sintético con canarios, para probar
+precinto keygen --out claves       # par Ed25519
+precinto perfiles                  # qué perfiles vienen incluidos
 
-python3 precinto.py scan demo/support-bundle-demo.tar.gz \
-        --profile perfiles/demo.json --out demo/salida --sign claves/private.pem
+precinto scan banco/support-bundle-demo.tar.gz \
+         --profile atlassian-dc --out salida --sign claves/private.pem
 
-python3 precinto.py verify demo/salida/manifest.json --public-key claves/public.pem
-python3 precinto.py bench demo/support-bundle-demo.tar.gz \
-        --canaries demo/canaries.json --profile perfiles/demo.json
+precinto verify salida/manifest.json --public-key claves/public.pem
+precinto bench banco/support-bundle-demo.tar.gz \
+         --canaries banco/canaries.json --profile demo
 ```
+
+`--profile` acepta tanto el **nombre** de un perfil incluido (`atlassian-dc`, `gitpod`,
+`grafana`, …) como la **ruta** a uno propio.
 
 Códigos de salida de `scan`: `0` PASA · `3` REVISAR · `4` BLOQUEADO.
 De `verify`: `0` procedencia probada · `2` inválido · `3` integridad sí, procedencia

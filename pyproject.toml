@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "precinto"
+version = "0.1.0"
+description = "Control de salida para paquetes de diagnóstico: sanea el support bundle antes de que cruce el perímetro y emite un manifiesto firmado de lo que hizo y de lo que no pudo inspeccionar."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "AGPL-3.0-only"
+keywords = ["support-bundle", "redaction", "pii", "secrets", "diagnostics", "air-gapped"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "Intended Audience :: Information Technology",
+  "Topic :: Security",
+  "Topic :: System :: Systems Administration",
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+# Una sola dependencia, y sólo para firmar y verificar: el escaneo funciona sin ella.
+dependencies = ["cryptography>=41"]
+
+[project.urls]
+Homepage = "https://precinto.eleata.io"
+Source = "https://github.com/hernaninverso/precinto"
+Issues = "https://github.com/hernaninverso/precinto/issues"
+
+[project.scripts]
+precinto = "precinto.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["precinto"]
+
+# Los perfiles viajan dentro del paquete `precinto/` y hatchling los incluye solo.
+# NO hace falta force-include (produce "a second file is being added"), pero SÍ hace
+# falta comprobar que estén: la rueda sin datos es el fallo que ya ocurrió tres veces
+# en este ecosistema, y siempre con los tests en verde porque se corrían en editable.
+# Lo comprueba T4.1 contando los .json dentro del .whl.
+
+[tool.hatch.build.targets.sdist]
+include = ["precinto", "README.md", "COMERCIAL.md", "LICENSE", "test_precinto.py",
+           "test_verificador_web.js", "sitio", "specs"]
