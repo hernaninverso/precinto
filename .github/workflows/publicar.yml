@@ -1,0 +1,101 @@
+name: publicar versión
+
+# Genera, para cada etiqueta de versión: la rueda, su inventario de componentes en
+# CycloneDX, los hashes, y la procedencia firmada por la propia plataforma mediante
+# atestación de artefactos. Nada de esto necesita una clave privada nuestra: la firma
+# la respalda la identidad del flujo, que es verificable por un tercero con
+# `gh attestation verify` sin confiar en nosotros.
+#
+# Es exactamente lo que pide un evaluador antes de instalar nada, y es lo que este
+# proyecto sostiene sobre los demás: la afirmación tiene que venir con su prueba.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write        # para la atestación de procedencia
+  attestations: write
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: construir rueda y distribución de fuentes
+        run: |
+          pip install --upgrade pip build
+          python -m build
+
+      - name: la rueda lleva los perfiles
+        run: |
+          python - <<'EOF'
+          import glob, zipfile, sys
+          w = glob.glob("dist/*.whl")[0]
+          js = [n for n in zipfile.ZipFile(w).namelist()
+                if n.endswith(".json") and "perfiles" in n]
+          print("perfiles dentro de la rueda: %d" % len(js))
+          if len(js) < 13:
+              sys.exit("la rueda salió sin los perfiles")
+          EOF
+
+      - name: inventario de componentes (CycloneDX)
+        run: |
+          pip install --upgrade cyclonedx-bom
+          python -m venv /tmp/env-sbom
+          /tmp/env-sbom/bin/pip install --quiet dist/*.whl
+          # El flag es -o/--output-file y --of/--output-format. Probado localmente
+          # antes de etiquetar: con `--outfile` la orden falla y la publicación se
+          # habría roto en la primera versión.
+          cyclonedx-py environment /tmp/env-sbom \
+            --of JSON -o dist/precinto.cdx.json
+          python - <<'EOF'
+          import json
+          d = json.load(open("dist/precinto.cdx.json"))
+          comps = d.get("components", [])
+          print("componentes inventariados: %d" % len(comps))
+          for c in comps:
+              lic = ", ".join(
+                  (l.get("license", {}) or {}).get("id")
+                  or (l.get("license", {}) or {}).get("name", "?")
+                  for l in c.get("licenses", []) or [{}])
+              print("  %-24s %-12s %s" % (c.get("name"), c.get("version"), lic or "sin declarar"))
+          EOF
+
+      - name: hashes de todo lo publicado
+        run: |
+          cd dist && sha256sum * | tee SHA256SUMS.txt
+
+      # Procedencia: liga cada artefacto a ESTE flujo, en ESTE repositorio, con ESTE
+      # commit. Un tercero lo comprueba con:
+      #   gh attestation verify precinto-X.Y.Z-py3-none-any.whl -R hernaninverso/precinto
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "dist/*.whl, dist/*.tar.gz"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/precinto.cdx.json
+            dist/SHA256SUMS.txt
+          body: |
+            Artefactos de esta versión, con lo que un evaluador necesita antes de instalar:
+
+            - **Rueda y distribución de fuentes**
+            - **`precinto.cdx.json`** — inventario de componentes en CycloneDX
+            - **`SHA256SUMS.txt`** — hashes de todo lo anterior
+            - **Procedencia firmada** — verificable sin confiar en nosotros:
+
+            ```
+            gh attestation verify precinto-*.whl -R hernaninverso/precinto
+            ```
+
+            Política de vulnerabilidades y plazos: `SEGURIDAD.md`.

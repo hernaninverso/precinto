@@ -118,6 +118,19 @@ determinista. Un modelo pequeño solo entra si supera esta línea de base en dat
 retenidos de otro sitio y otra fecha — y si no la supera, **se elimina**, no se conserva
 por marketing.
 
+## Verificar lo que instalás
+
+Cada versión publica su inventario de componentes en CycloneDX, los hashes y una
+procedencia firmada. Comprobalo sin confiar en nosotros:
+
+```bash
+gh attestation verify precinto-*.whl -R hernaninverso/precinto
+sha256sum -c SHA256SUMS.txt
+```
+
+La superficie real son cuatro componentes: `precinto`, `cryptography`, `cffi` y
+`pycparser`. Política de vulnerabilidades y plazos en `SEGURIDAD.md`.
+
 ## Contacto
 
 Licencias comerciales, fallos o desacuerdos con el enfoque: **precinto@eleata.io**
